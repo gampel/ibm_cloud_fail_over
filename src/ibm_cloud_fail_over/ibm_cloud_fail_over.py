@@ -561,7 +561,7 @@ def fail_over_fip(cmd, vni_id, fip_id):
     ha_fail_over = HAFailOver()
     ha_fail_over.update_vpc_fip(cmd, vni_id, fip_id)
 
-def fail_over_floating_ip(vpc_url, master_vni_id, passive_vni_id , fip_id):
+def fail_over_floating_ip(vpc_url, master_vni_id, passive_vni_id , fip_id, api_key=""):
     """_summary_
 
     Args:
@@ -572,10 +572,11 @@ def fail_over_floating_ip(vpc_url, master_vni_id, passive_vni_id , fip_id):
     """
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
+    ha_fail_over.apikey = api_key
     ha_fail_over.update_vpc_fip("remove", passive_vni_id, fip_id)
     ha_fail_over.update_vpc_fip("add", master_vni_id, fip_id)
 
-def fail_over_cr_vip (cmd , vpc_url, ext_ip_1 , ext_ip_2, api_key):
+def fail_over_cr_vip (cmd , vpc_url, ext_ip_1 , ext_ip_2, api_key=""):
     """_summary_
 
     Args:
