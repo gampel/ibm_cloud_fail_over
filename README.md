@@ -34,7 +34,10 @@ This function manages the failover of a Cloud Resource Virtual IP (CR VIP).
 from ibm_cloud_fail_over import fail_over_cr_vip
 
 # Example usage
-result = fail_over_cr_vip(primary_vip='your_primary_vip', secondary_vip='your_secondary_vip')
+result = fail_over_cr_vip(vpc_url='IBM Cloud VPC regional URL",
+                           primary_vip='your_primary_vip',
+                           secondary_vip='your_secondary_vip',
+                           api_key="Optional: API key" )
 print(result)
 ```
 
@@ -42,8 +45,11 @@ print(result)
 
 | Parameter          | Type   | Description                                      |
 |--------------------|--------|--------------------------------------------------|
+| `vpc_url    `      | str    | IBM Cloud VPC regional URL.                      |
 | `primary_vip`      | str    | The primary Virtual IP to monitor.               |
 | `secondary_vip`    | str    | The secondary Virtual IP to switch to.           |
+| `api_key`          | str    | Optional needed only if you are not using trusted| 
+                                 profile, IBM cloud api acsess key               |
 
 **Returns:**
 
@@ -59,17 +65,24 @@ This function manages the failover of a Floating IP.
 from ibm_cloud_fail_over import fail_over_floating_ip
 
 # Example usage
-result = fail_over_floating_ip(primary_ip='your_primary_ip', secondary_ip='your_secondary_ip')
+result = fail_over_floating_ip((vpc_url='IBM Cloud VPC regional URL",
+                                master_vni_id="Virtual network inetface uuid for new active",
+                                passive_vni_id="Virtual network inetface uuid for new passive" ,
+                                fip_id="teh floating ip uuid",
+                                api_key="Optional: API key" ))
 print(result)
 ```
 
 **Parameters:**
 
-| Parameter          | Type   | Description                                      |
-|--------------------|--------|--------------------------------------------------|
-| `primary_ip`       | str    | The primary Floating IP to monitor.              |
-| `secondary_ip`     | str    | The secondary Floating IP to switch to.          |
-
+| Parameter          | Type     | Description                                      |
+|--------------------|----------|--------------------------------------------------|
+| `vpc_url    `      | str(url) | IBM Cloud VPC regional URL.                      |
+| `master_vni_id`    | str(uuid)| Virtual network inetface uuid for new active.    |
+| `passive_vni_id`   | str(uuid)| Virtual network inetface uuid for new active.    |
+| `fip_id        `   | str(uuid)| Floating IP uuid to move.    |
+| `api_key`          | str      | Optional needed only if you are not using trusted| 
+                                   profile, IBM cloud api acsess key               |
 **Returns:**
 
 - A confirmation message indicating the success or failure of the failover operation.
@@ -81,6 +94,10 @@ If you encounter issues while using the module, consider the following:
 - **Invalid IP Addresses**: Ensure that the IP addresses provided for primary and secondary resources are valid and reachable.
 - **Network Issues**: Check your network connectivity to the IBM Cloud resources.
 - **Permissions**: Ensure that your IBM Cloud account has the necessary permissions to manage the specified resources.
+- **Required dependencies**: Enable [Instance Metada Service](https://cloud.ibm.com/docs/vpc?topic=vpc-imd-configure-service&interface=ui) on Both Enpoints
+- **Optional dependencies**: Enable [Trusted profile](https://cloud.ibm.com/docs/vpc?topic=vpc-imd-trusted-profile-metadata&interface=ui) to avoid using and api access key
+   
+
 
 For further assistance, please check the [GitHub Issues](https://github.com/gampel/ibm_cloud_fail_over/issues) page or contact the project maintainer.
 
@@ -100,13 +117,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Contact
 
-For questions or support, please open an issue on GitHub or contact the project maintainer at [your-email@example.com](mailto:your-email@example.com).
+For questions or support, please open an issue on GitHub or contact the project maintainer at [dev@gampel.net](mailto:dev@gampel.net).
 
 ```
 
-### Summary of Changes:
-- Included specific details about the two main functions (`fail_over_cr_vip` and `fail_over_floating_ip`).
-- Provided usage examples and parameter tables for clarity.
-- Added a troubleshooting section to help users resolve common issues. 
-
-Feel free to adjust any sections or details as needed!
+### TOOD:
+ 
