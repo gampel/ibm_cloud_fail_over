@@ -50,6 +50,8 @@ class HAFailOver():
     METADATA_HOST = "api.metadata.cloud.ibm.com"
     METADATA_PATH = "/instance_identity/v1/"
     METADATA_INSTACE_PATH = "/metadata/v1/instance"
+    METADATA_INSTACE_NETWORK_INT_PATH = "/metadata/v1/instance/network_interfaces"
+    METADATA_VNI_PATH = "/metadata/v1/virtual_network_interfaces"
     apikey = None
     vpc_url = ""
     vpc_id = ""
@@ -147,6 +149,24 @@ class HAFailOver():
             _type_: _description_
         """
         return f"{self.METADATA_PATH}token?version={self.METADATA_VERSION}"
+
+    def _get_metadata_istance_network_int_path(self):
+        """_summary_
+
+        Returns:
+            _type_: _description_
+        """
+        return f"{self.METADATA_INSTACE_NETWORK_INT_PATH}?version={self.METADATA_VERSION}"
+
+    def _get_metadata_vni_path(self):
+        """_summary_
+
+        Returns:
+            _type_: _description_
+        """
+        return f"{self.METADATA_VNI_PATH}?version={self.METADATA_VERSION}"
+
+
 
     def _get_metadata_istance_path(self):
         """_summary_
@@ -532,8 +552,26 @@ class HAFailOver():
                            self._get_metadata_istance_path(),
                            headers=self._get_metadata_headers_iam(metadata_token))
         response = json.loads(connection.getresponse().read().decode("utf-8"))
-        print (response)
         return response
+
+    def get_instance_interface_metadata(self):
+        connection = self._get_metadata_connection()
+        metadata_token = self._get_metadata_token(connection)
+        connection.request("GET",
+                           self._get_metadata_istance_network_int_path(),
+                           headers=self._get_metadata_headers_iam(metadata_token))
+        response = json.loads(connection.getresponse().read().decode("utf-8"))
+        return response
+
+    def get_vni_metadata(self):
+        connection = self._get_metadata_connection()
+        metadata_token = self._get_metadata_token(connection)
+        connection.request("GET",
+                           self._get_metadata_vni_path(),
+                           headers=self._get_metadata_headers_iam(metadata_token))
+        response = json.loads(connection.getresponse().read().decode("utf-8"))
+        return response
+
 
 def fail_over(cmd):
     """_summary_
@@ -561,20 +599,68 @@ def fail_over_fip(cmd, vni_id, fip_id):
     ha_fail_over = HAFailOver()
     ha_fail_over.update_vpc_fip(cmd, vni_id, fip_id)
 
-def fail_over_floating_ip(vpc_url, master_vni_id, passive_vni_id , fip_id, api_key=""):
+def fail_over_floating_ip_stop(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key=""):
     """_summary_
 
     Args:
         vpc_url (_type_): _description_
-        master_vni_id (_type_): _description_
-        passive_vni_id (_type_): _description_
+        vni_id_1 (_type_): _description_
+        vni_id_2 (_type_): _description_
         fip_id (_type_): _description_
+        apy_key  (string)
     """
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
     ha_fail_over.apikey = api_key
-    ha_fail_over.update_vpc_fip("remove", passive_vni_id, fip_id)
-    ha_fail_over.update_vpc_fip("add", master_vni_id, fip_id)
+    ha_fail_over = HAFailOver()
+    vni_metadata = ha_fail_over.get_vni_metadata()
+    if "virtual_network_interfaces" in vni_metadata:
+        for vni in vni_metadata["virtual_network_interfaces"]:
+            if vni["id"] == vni_id_1 or vni["id"] == vni_id_2:
+                local_vni_id = vni["id"]
+                ha_fail_over.update_vpc_fip("remove", local_vni_id, fip_id)
+    fip_id , fip_ip = fail_over_get_attached_fip()
+    return fip_id, fip_ip
+
+
+def fail_over_floating_ip_start(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key=""):
+    """_summary_
+
+    Args:
+        vpc_url (_type_): _description_
+        vni_id_1 (_type_): _description_
+        vni_id_2 (_type_): _description_
+        fip_id (_type_): _description_
+        apy_key  (string)
+    """
+    ha_fail_over = HAFailOver()
+    ha_fail_over.vpc_url = vpc_url
+    ha_fail_over.apikey = api_key
+    ha_fail_over = HAFailOver()
+    vni_metadata = ha_fail_over.get_vni_metadata()
+    if "virtual_network_interfaces" in vni_metadata:
+        for vni in vni_metadata["virtual_network_interfaces"]:
+            if vni["id"] == vni_id_1 or vni["id"] == vni_id_2:
+                local_vni_id = vni["id"]
+                if local_vni_id == vni_id_1:
+                    remote_vni_id = vni_id_2
+                else:
+                    remote_vni_id = vni_id_1
+                ha_fail_over.update_vpc_fip("remove", remote_vni_id, fip_id)
+                ha_fail_over.update_vpc_fip("add", local_vni_id, fip_id)
+    fip_id , fip_ip = fail_over_get_attached_fip()
+    return fip_id, fip_ip
+
+def fail_over_get_attached_fip():
+    ha_fail_over = HAFailOver()
+    instance_metadata = ha_fail_over.get_instance_interface_metadata()
+    if "network_interfaces" in instance_metadata:
+        if "floating_ips" in instance_metadata:
+            attached_fip_id = instance_metadata["network_interfaces"][0]["floating_ips"][0]["id"]
+            attached_fip_ip = instance_metadata["network_interfaces"] \
+                                                 [0]["floating_ips"][0]["address"]
+            return attached_fip_id, attached_fip_ip
+    return None , None
 
 def fail_over_cr_vip (cmd , vpc_url, ext_ip_1 , ext_ip_2, api_key=""):
     """_summary_
