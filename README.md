@@ -48,24 +48,23 @@ print(result)
 | `vpc_url    `      | str    | IBM Cloud VPC regional URL.                      |
 | `primary_vip`      | str    | The primary Virtual IP to monitor.               |
 | `secondary_vip`    | str    | The secondary Virtual IP to switch to.           |
-| `api_key`          | str    | Optional needed only if you are not using trusted| 
-                                 profile, IBM cloud api acsess key               |
+| `api_key`          | str    | Optional needed only if you are not using trusted profile, IBM cloud api acsess key               |
 
 **Returns:**
 
 - A confirmation message indicating the success or failure of the failover operation.
 
-#### `fail_over_floating_ip`
+#### `fail_over_floating_ip_start`
 
-This function manages the failover of a Floating IP.
+This function manages the failover of a Floating IP Attach to the caller Endpoint (VSI/BM)
 
 **Usage:**
 
 ```python
-from ibm_cloud_fail_over import fail_over_floating_ip
+from ibm_cloud_fail_over import fail_over_floating_ip_start
 
 # Example usage
-result = fail_over_floating_ip((vpc_url='IBM Cloud VPC regional URL",
+result = fail_over_floating_ip_start(vpc_url='IBM Cloud VPC regional URL",
                                 master_vni_id="Virtual network inetface uuid for new active",
                                 passive_vni_id="Virtual network inetface uuid for new passive" ,
                                 fip_id="teh floating ip uuid",
@@ -80,12 +79,63 @@ print(result)
 | `vpc_url    `      | str(url) | IBM Cloud VPC regional URL.                      |
 | `master_vni_id`    | str(uuid)| Virtual network inetface uuid for new active.    |
 | `passive_vni_id`   | str(uuid)| Virtual network inetface uuid for new active.    |
-| `fip_id        `   | str(uuid)| Floating IP uuid to move.    |
-| `api_key`          | str      | Optional needed only if you are not using trusted| 
-                                   profile, IBM cloud api acsess key               |
+| `fip_id        `   | str(uuid)| Floating IP uuid to move.                        |
+| `api_key`          | str      | Optional needed only if you are not using trusted profile, IBM cloud api acsess key|
 **Returns:**
 
 - A confirmation message indicating the success or failure of the failover operation.
+
+#### `fail_over_floating_ip_stop`
+
+This function manages the failover of a Floating IP Detach to the  caller Endpoint (VSI/BM)
+
+**Usage:**
+
+```python
+from ibm_cloud_fail_over import fail_over_floating_ip_stop
+
+# Example usage
+result = fail_over_floating_ip_stop(vpc_url='IBM Cloud VPC regional URL",
+                                master_vni_id="Virtual network inetface uuid for new active",
+                                passive_vni_id="Virtual network inetface uuid for new passive" ,
+                                fip_id="teh floating ip uuid",
+                                api_key="Optional: API key" ))
+print(result)
+```
+
+**Parameters:**
+
+| Parameter          | Type     | Description                                      |
+|--------------------|----------|--------------------------------------------------|
+| `vpc_url    `      | str(url) | IBM Cloud VPC regional URL.                      |
+| `master_vni_id`    | str(uuid)| Virtual network inetface uuid for new active.    |
+| `passive_vni_id`   | str(uuid)| Virtual network inetface uuid for new active.    |
+| `fip_id        `   | str(uuid)| Floating IP uuid to move.                        |
+| `api_key`          | str      | Optional needed only if you are not using trusted profile, IBM cloud api acsess key |
+**Returns:**
+
+- A confirmation message indicating the success or failure of the failover operation.
+#### `fail_over_get_attached_fip`
+
+This function manages the failover of a Floating IP Detach to the  caller Endpoint (VSI/BM)
+
+**Usage:**
+
+```python
+from ibm_cloud_fail_over import fail_over_get_attached_fip
+
+# Example usage
+attached_fip_id, attached_fip_ip = fail_over_get_attached_fip()
+
+print(attached_fip_ip)
+print(attached_fip_id)
+```
+
+**Parameters:**
+None
+
+**Returns:**
+attached_fip_id, attached_fip_ip 
 
 ## Troubleshooting
 
