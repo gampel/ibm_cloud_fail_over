@@ -636,7 +636,7 @@ def fail_over_floating_ip_start(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key=""
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
     ha_fail_over.apikey = api_key
-    ha_fail_over = HAFailOver()
+    instance_metadata = ha_fail_over.get_instance_metadata()
     vni_metadata = ha_fail_over.get_vni_metadata()
     if "virtual_network_interfaces" in vni_metadata:
         for vni in vni_metadata["virtual_network_interfaces"]:
@@ -654,11 +654,10 @@ def fail_over_floating_ip_start(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key=""
 def fail_over_get_attached_fip():
     ha_fail_over = HAFailOver()
     instance_metadata = ha_fail_over.get_instance_interface_metadata()
-    if "network_interfaces" in instance_metadata:
-        if "floating_ips" in instance_metadata:
-            attached_fip_id = instance_metadata["network_interfaces"][0]["floating_ips"][0]["id"]
-            attached_fip_ip = instance_metadata["network_interfaces"] \
-                                                 [0]["floating_ips"][0]["address"]
+    for net_i in instance_metadata["network_interfaces"]:
+        if "floating_ips" in net_i:
+            attached_fip_id = net_i["floating_ips"][0]["id"]
+            attached_fip_ip = net_i["floating_ips"][0]["address"]
             return attached_fip_id, attached_fip_ip
     return None , None
 
