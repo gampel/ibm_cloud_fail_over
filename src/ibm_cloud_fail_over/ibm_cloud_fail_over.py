@@ -612,7 +612,6 @@ def fail_over_floating_ip_stop(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key="")
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
     ha_fail_over.apikey = api_key
-    ha_fail_over = HAFailOver()
     vni_metadata = ha_fail_over.get_vni_metadata()
     if "virtual_network_interfaces" in vni_metadata:
         for vni in vni_metadata["virtual_network_interfaces"]:
