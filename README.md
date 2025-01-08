@@ -67,7 +67,7 @@ from ibm_cloud_fail_over import fail_over_floating_ip_start
 result = fail_over_floating_ip_start(vpc_url='IBM Cloud VPC regional URL",
                                 master_vni_id="Virtual network inetface uuid for new active",
                                 passive_vni_id="Virtual network inetface uuid for new passive" ,
-                                fip_id="teh floating ip uuid",
+                                fip_id="the floating ip uuid",
                                 api_key="Optional: API key" ))
 print(result)
 ```
@@ -98,7 +98,7 @@ from ibm_cloud_fail_over import fail_over_floating_ip_stop
 result = fail_over_floating_ip_stop(vpc_url='IBM Cloud VPC regional URL",
                                 master_vni_id="Virtual network inetface uuid for new active",
                                 passive_vni_id="Virtual network inetface uuid for new passive" ,
-                                fip_id="teh floating ip uuid",
+                                fip_id="the floating ip uuid",
                                 api_key="Optional: API key" ))
 print(result)
 ```
