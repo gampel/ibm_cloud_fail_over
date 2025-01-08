@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ibm_cloud_fail_over"
-version = "0.0.7"
+version = "1.0.7"
 authors = [
   { name="Eran Gampel", email="dev@gampel.net" },
 ]
