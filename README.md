@@ -34,11 +34,11 @@ This function manages the failover of a Cloud Resource Virtual IP (CR VIP).
 from ibm_cloud_fail_over import fail_over_cr_vip
 
 # Example usage
-result = fail_over_cr_vip(vpc_url='IBM Cloud VPC regional URL",
+active_ip = fail_over_cr_vip(vpc_url='IBM Cloud VPC regional URL",
                            primary_vip='your_primary_vip',
                            secondary_vip='your_secondary_vip',
                            api_key="Optional: API key" )
-print(result)
+print(active_ip)
 ```
 
 **Parameters:**
@@ -52,7 +52,7 @@ print(result)
 
 **Returns:**
 
-- A confirmation message indicating the success or failure of the failover operation.
+-  The Active ip post failover operation.
 
 #### `fail_over_floating_ip_start`
 
