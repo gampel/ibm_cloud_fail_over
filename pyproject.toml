@@ -16,7 +16,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-
+dependencies = ["ibm-cloud-sdk-core" , "ibm-vpc"]
 [project.urls]
 Homepage = "https://github.com/gampel/ibm_cloud_fail_over"
 Issues = "https://github.com/gampel/ibm_cloud_fail_over/issues"
