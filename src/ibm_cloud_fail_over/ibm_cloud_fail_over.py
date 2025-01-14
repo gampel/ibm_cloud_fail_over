@@ -654,9 +654,9 @@ def fail_over_get_attached_fip():
     ha_fail_over = HAFailOver()
     instance_metadata = ha_fail_over.get_instance_interface_metadata()
     for net_i in instance_metadata["network_interfaces"]:
-        if "floating_ips" in net_i:
-            attached_fip_id = net_i["floating_ips"][0]["id"]
-            attached_fip_ip = net_i["floating_ips"][0]["address"]
+        for floating_ips in net_i["floating_ips"]:
+            attached_fip_id = floating_ips["id"]
+            attached_fip_ip = floating_ips["address"]
             return attached_fip_id, attached_fip_ip
     return None , None
 
