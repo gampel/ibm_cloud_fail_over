@@ -647,7 +647,7 @@ def fail_over_floating_ip_start(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key=""
                     remote_vni_id = vni_id_1
                 ha_fail_over.update_vpc_fip("remove", remote_vni_id, fip_id)
                 ha_fail_over.update_vpc_fip("add", local_vni_id, fip_id)
-    fip_id , fip_ip = fail_over_get_attached_fip()
+    fip_id , fip_ip = fail_over_get_attached_fip(api_key)
     return fip_id, fip_ip
 
 def fail_over_get_attached_fip(api_key):
