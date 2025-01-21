@@ -125,7 +125,8 @@ This function manages the failover of a Floating IP Detach to the  caller Endpoi
 from ibm_cloud_fail_over import fail_over_get_attached_fip
 
 # Example usage
-attached_fip_id, attached_fip_ip = fail_over_get_attached_fip()
+api_key = ""
+attached_fip_id, attached_fip_ip = fail_over_get_attached_fip(api_key)
 
 print(attached_fip_ip)
 print(attached_fip_id)
