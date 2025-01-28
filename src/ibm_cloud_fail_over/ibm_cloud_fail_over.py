@@ -246,7 +246,7 @@ class HAFailOver():
             _type_: _description_
         """
         # URL for token
-        conn = http.client.HTTPSConnection("iam.cloud.ibm.com")
+        conn = http.client.HTTPSConnection("private.iam.cloud.ibm.com")
         # Payload for retrieving token. Note: An API key will need to be generated and replaced here
         payload = (
             "grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey="
