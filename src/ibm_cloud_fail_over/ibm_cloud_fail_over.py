@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+    #!/usr/bin/env python3
 
 # Copyright 2024 Eran Gampel
 # Authors:      Eran Gampel , Jorge Hernández Ramírez
@@ -572,6 +572,98 @@ class HAFailOver():
         response = json.loads(connection.getresponse().read().decode("utf-8"))
         return response
 
+    def update_public_address_range(self, range_id):
+        """Update the target zone of a public address range to match the VSI's local availability zone.
+
+        Args:
+            range_id (str): The ID of the public address range to update
+
+        Returns:
+            dict: The updated public address range information if updated, None if no update needed
+
+        Raises:
+            ApiException: If there is an error updating the range
+        """
+        self.logger("Checking public address range target zone")
+        self.logger("Range ID: " + range_id)
+        
+        authenticator = BearerTokenAuthenticator(self.get_token())
+        self.service = VpcV1(authenticator=authenticator)
+        self.service.set_service_url(self.vpc_url)
+        
+        try:
+            conn = http.client.HTTPSConnection(self.vpc_url.replace('https://', ''))
+            headers = {
+                'Authorization': self.get_token(),
+                'Content-Type': 'application/json'
+            }
+            
+            conn.request("GET", f"/v1/public_address_ranges/{range_id}", headers=headers)
+            response = conn.getresponse()
+            if response.status != 200:
+                raise ApiException(f"Failed to get public address range: {response.status} {response.reason}")
+            
+            current_range = json.loads(response.read().decode("utf-8"))
+            current_zone = current_range.get('zone', {}).get('name')
+            
+            self.logger(f"Current zone: {current_zone}")
+            self.logger(f"VSI local zone: {self.vsi_local_az}")
+            
+            if current_zone != self.vsi_local_az:
+                self.logger("Updating public address range target zone")
+                range_patch_model = {
+                    "zone": {
+                        "name": self.vsi_local_az
+                    }
+                }
+                
+                conn.request("PATCH", 
+                            f"/v1/public_address_ranges/{range_id}",
+                            body=json.dumps(range_patch_model),
+                            headers=headers)
+                
+                response = conn.getresponse()
+                if response.status != 200:
+                    raise ApiException(f"Failed to update public address range: {response.status} {response.reason}")
+                
+                updated_range = json.loads(response.read().decode("utf-8"))
+                self.logger("Successfully updated public address range")
+                return updated_range
+            else:
+                self.logger("No update needed - range already in correct zone")
+                return None
+            
+        except ApiException as e:
+            self.logger(f"Error updating public address range: {e}")
+            raise
+        except Exception as e:
+            self.logger(f"Unexpected error: {e}")
+            raise ApiException(f"Unexpected error: {e}")
+        finally:
+            if 'conn' in locals():
+                conn.close()
+
+    def fail_over_public_address_range(range_id, vpc_url="", api_key=""):
+        """Update the target zone of a public address range to match the VSI's local availability zone.
+
+        Args:
+            range_id (str): The ID of the public address range to update
+            vpc_url (str, optional): IBM Cloud VPC regional URL. Defaults to "".
+            api_key (str, optional): IBM Cloud API key. Defaults to "".
+
+        Returns:
+            dict: The updated public address range information if updated, None if no update needed
+        """
+        ha_fail_over = HAFailOver()
+        ha_fail_over.vpc_url = vpc_url
+        ha_fail_over.apikey = api_key
+        
+        # Get instance metadata to set VSI local AZ
+        instance_metadata = ha_fail_over.get_instance_metadata()
+        if "zone" in instance_metadata:
+            ha_fail_over.vsi_local_az = instance_metadata["zone"]["name"]
+        
+        return ha_fail_over.update_public_address_range(range_id)
 
 def fail_over(cmd):
     """_summary_
