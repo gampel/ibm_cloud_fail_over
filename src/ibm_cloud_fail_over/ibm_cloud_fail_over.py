@@ -591,8 +591,8 @@ class HAFailOver():
         self.logger("Range ID: " + range_id)
 
         authenticator = BearerTokenAuthenticator(self.get_token())
-        self.service = VpcV1(authenticator=authenticator)
-        self.service.set_service_url(self.vpc_url)
+        #self.service = VpcV1(authenticator=authenticator)
+        #self.service.set_service_url(self.vpc_url)
 
         try:
             conn = http.client.HTTPSConnection(self.vpc_url.replace('https://', ''))
