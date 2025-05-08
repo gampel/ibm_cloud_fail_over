@@ -1,5 +1,3 @@
-
-```markdown
 # IBM Cloud Fail Over Functions
 
 
@@ -137,6 +135,48 @@ None
 
 **Returns:**
 attached_fip_id, attached_fip_ip 
+
+#### `fail_over_public_address_range`
+
+This function manages the failover of a public address range by updating its target zone to match the VSI's local availability zone.
+
+**Usage:**
+
+```python
+from ibm_cloud_fail_over import fail_over_public_address_range
+
+# Example usage
+result = fail_over_public_address_range(
+    range_id="public_address_range_uuid",
+    vpc_url="IBM Cloud VPC regional URL",
+    api_key="Optional: API key",
+    api_version="2025-05-06",  # Optional: API version
+    maturity="beta",           # Optional: API maturity level
+    generation="2"             # Optional: API generation
+)
+print(result)
+```
+
+**Parameters:**
+
+| Parameter          | Type     | Description                                      |
+|--------------------|----------|--------------------------------------------------|
+| `range_id`         | str(uuid)| The ID of the public address range to update     |
+| `vpc_url`          | str(url) | IBM Cloud VPC regional URL                       |
+| `api_key`          | str      | Optional: IBM Cloud API key (needed only if not using trusted profile) |
+| `api_version`      | str      | Optional: API version (defaults to "2025-05-06") |
+| `maturity`         | str      | Optional: API maturity level (defaults to "beta")|
+| `generation`       | str      | Optional: API generation (defaults to "2")       |
+
+**Returns:**
+
+- The updated public address range information if an update was needed
+- None if no update was needed (range already in correct zone)
+
+**Note:**
+- The function automatically detects the VSI's local availability zone
+- The range is only updated if its current zone differs from the VSI's local zone
+- Requires the same instance metadata service and trusted profile setup as other functions
 
 ## Troubleshooting
 
