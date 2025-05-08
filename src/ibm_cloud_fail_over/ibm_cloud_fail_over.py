@@ -572,11 +572,14 @@ class HAFailOver():
         response = json.loads(connection.getresponse().read().decode("utf-8"))
         return response
 
-    def update_public_address_range(self, range_id):
+    def update_public_address_range(self, range_id, api_version="2024-03-19", maturity="beta", generation="2"):
         """Update the target zone of a public address range to match the VSI's local availability zone.
 
         Args:
             range_id (str): The ID of the public address range to update
+            api_version (str, optional): API version to use. Defaults to "2024-03-19".
+            maturity (str, optional): API maturity level. Defaults to "beta".
+            generation (str, optional): API generation. Defaults to "2".
 
         Returns:
             dict: The updated public address range information if updated, None if no update needed
@@ -586,29 +589,32 @@ class HAFailOver():
         """
         self.logger("Checking public address range target zone")
         self.logger("Range ID: " + range_id)
-        
+
         authenticator = BearerTokenAuthenticator(self.get_token())
         self.service = VpcV1(authenticator=authenticator)
         self.service.set_service_url(self.vpc_url)
-        
+
         try:
             conn = http.client.HTTPSConnection(self.vpc_url.replace('https://', ''))
             headers = {
                 'Authorization': self.get_token(),
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-IBM-Cloud-API-Version': api_version,
+                'X-IBM-Cloud-Maturity': maturity,
+                'X-IBM-Cloud-Generation': generation
             }
-            
-            conn.request("GET", f"/v1/public_address_ranges/{range_id}", headers=headers)
+
+            conn.request("GET", f"/v1/public_address_ranges/{range_id}?version={api_version}&generation={generation}", headers=headers)
             response = conn.getresponse()
             if response.status != 200:
                 raise ApiException(f"Failed to get public address range: {response.status} {response.reason}")
-            
+
             current_range = json.loads(response.read().decode("utf-8"))
             current_zone = current_range.get('zone', {}).get('name')
-            
+
             self.logger(f"Current zone: {current_zone}")
             self.logger(f"VSI local zone: {self.vsi_local_az}")
-            
+
             if current_zone != self.vsi_local_az:
                 self.logger("Updating public address range target zone")
                 range_patch_model = {
@@ -616,23 +622,23 @@ class HAFailOver():
                         "name": self.vsi_local_az
                     }
                 }
-                
-                conn.request("PATCH", 
-                            f"/v1/public_address_ranges/{range_id}",
+
+                conn.request("PATCH",
+                            f"/v1/public_address_ranges/{range_id}?version={api_version}&generation={generation}",
                             body=json.dumps(range_patch_model),
                             headers=headers)
-                
+
                 response = conn.getresponse()
                 if response.status != 200:
                     raise ApiException(f"Failed to update public address range: {response.status} {response.reason}")
-                
+
                 updated_range = json.loads(response.read().decode("utf-8"))
                 self.logger("Successfully updated public address range")
                 return updated_range
             else:
                 self.logger("No update needed - range already in correct zone")
                 return None
-            
+
         except ApiException as e:
             self.logger(f"Error updating public address range: {e}")
             raise
@@ -643,27 +649,30 @@ class HAFailOver():
             if 'conn' in locals():
                 conn.close()
 
-    def fail_over_public_address_range(range_id, vpc_url="", api_key=""):
-        """Update the target zone of a public address range to match the VSI's local availability zone.
+def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version="2024-03-19", maturity="beta", generation="2"):
+    """Update the target zone of a public address range to match the VSI's local availability zone.
 
-        Args:
-            range_id (str): The ID of the public address range to update
-            vpc_url (str, optional): IBM Cloud VPC regional URL. Defaults to "".
-            api_key (str, optional): IBM Cloud API key. Defaults to "".
+    Args:
+        range_id (str): The ID of the public address range to update
+        vpc_url (str, optional): IBM Cloud VPC regional URL. Defaults to "".
+        api_key (str, optional): IBM Cloud API key. Defaults to "".
+        api_version (str, optional): API version to use. Defaults to "2024-03-19".
+        maturity (str, optional): API maturity level. Defaults to "beta".
+        generation (str, optional): API generation. Defaults to "2".
 
-        Returns:
-            dict: The updated public address range information if updated, None if no update needed
-        """
-        ha_fail_over = HAFailOver()
-        ha_fail_over.vpc_url = vpc_url
-        ha_fail_over.apikey = api_key
-        
-        # Get instance metadata to set VSI local AZ
-        instance_metadata = ha_fail_over.get_instance_metadata()
-        if "zone" in instance_metadata:
-            ha_fail_over.vsi_local_az = instance_metadata["zone"]["name"]
-        
-        return ha_fail_over.update_public_address_range(range_id)
+    Returns:
+        dict: The updated public address range information if updated, None if no update needed
+    """
+    ha_fail_over = HAFailOver()
+    ha_fail_over.vpc_url = vpc_url
+    ha_fail_over.apikey = api_key
+
+    # Get instance metadata to set VSI local AZ
+    instance_metadata = ha_fail_over.get_instance_metadata()
+    if "zone" in instance_metadata:
+        ha_fail_over.vsi_local_az = instance_metadata["zone"]["name"]
+
+    return ha_fail_over.update_public_address_range(range_id, api_version, maturity, generation)
 
 def fail_over(cmd):
     """_summary_
