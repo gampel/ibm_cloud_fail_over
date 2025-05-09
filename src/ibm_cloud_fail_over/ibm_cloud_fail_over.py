@@ -20,6 +20,7 @@ This module provides functions for handling failover operations in IBM Cloud VPC
 
 import http.client
 import json
+import sys
 import socket
 from typing import Dict, Optional, Tuple, Any
 from os import environ as env
