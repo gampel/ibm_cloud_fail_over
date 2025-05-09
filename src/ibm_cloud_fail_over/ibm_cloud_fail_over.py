@@ -61,7 +61,7 @@ class HAFailOver():
     ext_ip_2 = ""
     vsi_local_az = ""
     DEBUG = False
-    DEBUG = True
+    #DEBUG = True
     service = None
 
     def __init__(self) -> None:
@@ -616,17 +616,25 @@ class HAFailOver():
             if 'conn' in locals():
                 conn.close()
 
-    def check_par_zone_compatibility(self, range_id, api_version="2025-05-06", maturity="beta", generation="2"):
+    def check_par_zone_compatibility(
+        self,
+        range_id: str,
+        api_version: str = "2025-05-06",
+        maturity: str = "beta",
+        generation: str = "2"
+    ) -> Tuple[bool, str]:
         """Check if the public address range and VSI are in the same zone.
 
         Args:
-            range_id (str): The ID of the public address range to check
-            api_version (str, optional): API version to use. Defaults to "2025-05-06".
-            maturity (str, optional): API maturity level. Defaults to "beta".
-            generation (str, optional): API generation. Defaults to "2".
+            range_id: The ID of the public address range to check
+            api_version: API version to use
+            maturity: API maturity level
+            generation: API generation
 
         Returns:
-            tuple: (bool, str) - (True if zones match, current zone name)
+            A tuple containing:
+                - bool: True if zones match, False otherwise
+                - str: Current zone name
         """
         self.logger("Checking zone compatibility")
         
