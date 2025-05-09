@@ -640,22 +640,18 @@ class HAFailOver():
             ApiException: If there is an error checking zone compatibility
         """
         self.logger("Checking zone compatibility")
-        
         try:
             range_info = self.get_public_address_range(range_id, api_version, maturity, generation)
             current_zone = range_info.get('target', {}).get('zone', {}).get('name')
-            
             self.logger(f"Current range zone: {current_zone}")
             self.logger(f"VSI local zone: {self.vsi_local_az}")
-            
             zones_match = current_zone == self.vsi_local_az
             return zones_match, current_zone
-            
         except Exception as e:
             self.logger(f"Error checking zone compatibility: {e}")
             raise ApiException(f"Error checking zone compatibility: {e}")
 
-    def update_public_address_range(self, range_id, api_version="2025-05-06", 
+    def update_public_address_range(self, range_id, api_version="2025-05-06",
                                   maturity="beta", generation="2"):
         """Update the target zone of a public address range to match the VSI's local availability zone.
 
@@ -672,17 +668,13 @@ class HAFailOver():
             ApiException: If there is an error updating the range
         """
         self.logger("Checking public address range target zone")
-        
         try:
-            zones_match, _ = self.check_par_zone_compatibility(range_id, api_version, 
+            zones_match, _ = self.check_par_zone_compatibility(range_id, api_version,
                                                              maturity, generation)
-            
             if not zones_match:
                 return self._update_range_zone(range_id, api_version, maturity, generation)
-            
             self.logger("No update needed - range already in correct zone")
             return None
-
         except ApiException as e:
             self.logger(f"Error updating public address range: {e}")
             raise ApiException(f"Error updating public address range: {e}") from e
