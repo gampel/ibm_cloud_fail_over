@@ -635,6 +635,9 @@ class HAFailOver():
             A tuple containing:
                 - bool: True if zones match, False otherwise
                 - str: Current zone name
+
+        Raises:
+            ApiException: If there is an error checking zone compatibility
         """
         self.logger("Checking zone compatibility")
         
@@ -650,7 +653,7 @@ class HAFailOver():
             
         except Exception as e:
             self.logger(f"Error checking zone compatibility: {e}")
-            raise
+            raise ApiException(f"Error checking zone compatibility: {e}")
 
     def update_public_address_range(self, range_id, api_version="2025-05-06", maturity="beta", generation="2"):
         """Update the target zone of a public address range to match the VSI's local availability zone.
@@ -740,6 +743,9 @@ def fail_over_check_par_zone_compatibility(
         A tuple containing:
             - bool: True if zones match, False otherwise
             - str: Current zone name
+
+    Raises:
+        ApiException: If there is an error checking zone compatibility
     """
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
