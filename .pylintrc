@@ -14,6 +14,9 @@ disable=C0111,  # missing-docstring
         R0914,  # too-many-locals
         R0915,  # too-many-statements
         W0703,  # broad-except
+        R1702,
+        C0330,
+        C0326,
 
 [FORMAT]
 max-line-length=120

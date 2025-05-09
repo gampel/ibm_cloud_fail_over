@@ -13,6 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 """IBM Cloud Fail Over module.
 
 This module provides functions for handling failover operations in IBM Cloud VPC.
@@ -22,7 +23,7 @@ import http.client
 import json
 import sys
 import socket
-from typing import Dict, Optional, Tuple, Any
+from typing import Tuple
 from os import environ as env
 from dotenv import load_dotenv
 from ibm_cloud_sdk_core import ApiException
@@ -443,17 +444,10 @@ class HAFailOver():
                         print(route["next_hop"]["address"])
                         return route["next_hop"]["address"]
                     self.find_the_current_and_next_hop_ip(route["next_hop"]["address"])
-                    self.logger(
-                        "VPC routing table route found!!, ID: %s,"
-                        "Name: %s, zone: %s, Next_Hop:%s, Destination:%s "
-                        % (
-                            route["id"],
-                            route["name"],
-                            route["zone"]["name"],
-                            route["next_hop"]["address"],
-                            route["destination"],
-                        )
-                    )
+                    self.logger(f"VPC routing table route found!!, ID: {route['id']}, "
+                                f"Name: {route['name']}, zone: {route['zone']['name']}, "
+                                f"Next_Hop: {route['next_hop']['address']}, "
+                                f"Destination: {route['destination']}")
                     self.logger(route)
                     route_next_hop_prototype_model = {
                         "address": self.update_next_hop_vsi
@@ -585,8 +579,8 @@ class HAFailOver():
             ApiException: If there is an error getting the range
         """
         self.logger("Getting public address range information")
-        self.logger("Range ID: " + range_id)
-        self.logger("VPC_URL: " + self.vpc_url)
+        self.logger(f"Range ID: {range_id}")
+        self.logger(f"VPC_URL: {self.vpc_url}")
 
         try:
             conn = http.client.HTTPSConnection(self.vpc_url.replace('https://', ''))
@@ -606,16 +600,8 @@ class HAFailOver():
             range_info = json.loads(response.read().decode("utf-8"))
             self.logger(f"Range information: {range_info}")
             return range_info
-
-        except ApiException as e:
-            self.logger(f"Error getting public address range: {e}")
-            raise
         except Exception as e:
-            self.logger(f"Unexpected error: {e}")
-            raise ApiException(f"Unexpected error: {e}")
-        finally:
-            if 'conn' in locals():
-                conn.close()
+            raise ApiException(f"Unexpected error: {e}") from e
 
     def _update_range_zone(self, range_id, api_version, maturity, generation):
         """Update the zone of a public address range.
@@ -732,26 +718,23 @@ class HAFailOver():
         except Exception as e:
             self.logger(f"Unexpected error: {e}")
             raise ApiException(f"Unexpected error: {e}") from e
-        finally:
-            if 'conn' in locals():
-                conn.close()
 
     def _process_route(self, route, table_id_temp, cmd, ingress_routing_table):
         """Process a single route.
 
         Args:
-            route: Route to process
-            table_id_temp: Table ID
-            cmd: Command to execute
+            route: The route to process
+            table_id_temp: The table ID
+            cmd: The command to execute
             ingress_routing_table: Whether this is an ingress routing table
 
         Returns:
-            str: Next hop VSI if found
+            str: The updated next hop IP if found
         """
         route_id_temp = route["id"]
         self.logger(f"Route ID: {route['id']}")
-        
-        if not (route["next_hop"]["address"] == self.ext_ip_1 or 
+
+        if not (route["next_hop"]["address"] == self.ext_ip_1 or
                 route["next_hop"]["address"] == self.ext_ip_2):
             return None
 
@@ -785,8 +768,104 @@ class HAFailOver():
         if route["zone"]["name"] == self.vsi_local_az or not ingress_routing_table:
             self._update_existing_route(route_id_temp, table_id_temp, route_patch_model)
         else:
-            self._create_new_route(route, table_id_temp, route_next_hop_prototype_model, 
+            self._create_new_route(route, table_id_temp, route_next_hop_prototype_model,
                                  zone_identity_model, route_patch_model)
+
+    def _update_existing_route(self, route_id_temp, table_id_temp, route_patch_model):
+        """Update an existing route.
+
+        Args:
+            route_id_temp: Route ID to update
+            table_id_temp: Table ID containing the route
+            route_patch_model: Model containing the route updates
+
+        Returns:
+            dict: The updated route information
+        """
+        self.logger(f"Update old route: {route_id_temp}")
+        self.logger(f"Same AZ Fail over AZ: {self.vsi_local_az}")
+        update_vpc_routing_table_route_response = (
+            self.service.update_vpc_routing_table_route(
+                vpc_id=self.vpc_id,
+                routing_table_id=table_id_temp,
+                id=route_id_temp,
+                route_patch=route_patch_model,
+            )
+        )
+        result = update_vpc_routing_table_route_response.get_result()
+        self.logger("Update old route result: ")
+        self.logger(result)
+        return result
+
+    def _create_new_route(self, route, table_id_temp, route_models):
+        """Create a new route.
+
+        Args:
+            route: Original route information
+            table_id_temp: Table ID to create the route in
+            route_models: Dictionary containing all route-related models:
+                - next_hop: Model for the next hop
+                - zone: Model for the zone
+                - patch: Model containing the route updates
+
+        Returns:
+            dict: The created route information
+        """
+        try:
+            if self.vsi_local_az != "":
+                route_models['zone'] = {"name": self.vsi_local_az}
+
+            self.service.delete_vpc_routing_table_route(
+                vpc_id=self.vpc_id,
+                routing_table_id=table_id_temp,
+                id=route["id"],
+            )
+            self.logger(f"Deleted old route: {route['id']}")
+
+            # Create new route
+            create_vpc_routing_table_route_response = (
+                self.service.create_vpc_routing_table_route(
+                    vpc_id=self.vpc_id,
+                    routing_table_id=table_id_temp,
+                    destination=route["destination"],
+                    zone=route_models['zone'],
+                    action="deliver",
+                    next_hop=route_models['next_hop'],
+                    name=route["name"],
+                    advertise=route["advertise"],
+                )
+            )
+            new_route = create_vpc_routing_table_route_response.get_result()
+            self.logger(f"Created new route: {new_route['id']}")
+            return new_route
+        except ApiException as e:
+            self.logger(f"Error creating new route: {e}")
+            raise ApiException(f"Error creating new route: {e}") from e
+
+def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version="2025-05-06", maturity="beta", generation="2"):
+    """Update the target zone of a public address range to match the VSI's local availability zone.
+
+    Args:
+        range_id (str): The ID of the public address range to update
+        vpc_url (str, optional): IBM Cloud VPC regional URL. Defaults to "".
+        api_key (str, optional): IBM Cloud API key. Defaults to "".
+        api_version (str, optional): API version to use. Defaults to "2025-05-06".
+        maturity (str, optional): API maturity level. Defaults to "beta".
+        generation (str, optional): API generation. Defaults to "2".
+
+    Returns:
+        dict: The updated public address range information if updated, None if no update needed
+    """
+    ha_fail_over = HAFailOver()
+    ha_fail_over.vpc_url = vpc_url
+    ha_fail_over.apikey = api_key
+
+    # Get instance metadata to set VSI local AZ
+    instance_metadata = ha_fail_over.get_instance_metadata()
+    if "zone" in instance_metadata:
+        ha_fail_over.vsi_local_az = instance_metadata["zone"]["name"]
+
+    return ha_fail_over.update_public_address_range(range_id, api_version, maturity, generation)
 
 def fail_over_check_par_zone_compatibility(
     range_id: str,
@@ -879,7 +958,7 @@ def fail_over_floating_ip_start(vpc_url, vni_id_1, vni_id_2, fip_id, api_key="")
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
     ha_fail_over.apikey = api_key
-    
+
     # Get VNI metadata directly since we don't use instance metadata
     vni_metadata = ha_fail_over.get_vni_metadata()
     if "virtual_network_interfaces" in vni_metadata:
