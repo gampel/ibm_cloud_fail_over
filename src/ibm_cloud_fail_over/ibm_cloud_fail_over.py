@@ -655,7 +655,8 @@ class HAFailOver():
             self.logger(f"Error checking zone compatibility: {e}")
             raise ApiException(f"Error checking zone compatibility: {e}")
 
-    def update_public_address_range(self, range_id, api_version="2025-05-06", maturity="beta", generation="2"):
+    def update_public_address_range(self, range_id, api_version="2025-05-06", 
+                                  maturity="beta", generation="2"):
         """Update the target zone of a public address range to match the VSI's local availability zone.
 
         Args:
@@ -673,50 +674,21 @@ class HAFailOver():
         self.logger("Checking public address range target zone")
         
         try:
-            zones_match, current_zone = self.check_par_zone_compatibility(range_id, api_version, maturity, generation)
+            zones_match, _ = self.check_par_zone_compatibility(range_id, api_version, 
+                                                             maturity, generation)
             
             if not zones_match:
-                self.logger("Updating public address range target zone")
-                conn = http.client.HTTPSConnection(self.vpc_url.replace('https://', ''))
-                headers = {
-                    'Authorization': self.get_token(),
-                    'Content-Type': 'application/json',
-                    'X-IBM-Cloud-API-Version': api_version,
-                    'X-IBM-Cloud-Maturity': maturity,
-                    'X-IBM-Cloud-Generation': generation
-                }
-
-                range_patch_model = {
-                    "target": {
-                        "zone": {
-                            "name": self.vsi_local_az
-                        }
-                    }
-                }
-
-                self.logger(f"Update range_patch_model: {range_patch_model}")
-                conn.request("PATCH",
-                            f"/v1/public_address_ranges/{range_id}?version={api_version}&generation={generation}&maturity=beta",
-                            body=json.dumps(range_patch_model),
-                            headers=headers)
-
-                response = conn.getresponse()
-                if response.status != 200:
-                    raise ApiException(f"Failed to update public address range: {response.status} {response.reason}")
-                updated_range = json.loads(response.read().decode("utf-8"))
-                self.logger(f"Update response: {updated_range}")
-                self.logger("Successfully updated public address range")
-                return updated_range
-            else:
-                self.logger("No update needed - range already in correct zone")
-                return None
+                return self._update_range_zone(range_id, api_version, maturity, generation)
+            
+            self.logger("No update needed - range already in correct zone")
+            return None
 
         except ApiException as e:
             self.logger(f"Error updating public address range: {e}")
-            raise
+            raise ApiException(f"Error updating public address range: {e}") from e
         except Exception as e:
             self.logger(f"Unexpected error: {e}")
-            raise ApiException(f"Unexpected error: {e}")
+            raise ApiException(f"Unexpected error: {e}") from e
         finally:
             if 'conn' in locals():
                 conn.close()
@@ -729,24 +701,6 @@ def fail_over_check_par_zone_compatibility(
     maturity: str = "beta",
     generation: str = "2"
 ) -> Tuple[bool, str]:
-    """Check if the public address range and VSI are in the same zone.
-
-    Args:
-        range_id: The ID of the public address range to check
-        vpc_url: IBM Cloud VPC regional URL
-        api_key: IBM Cloud API key
-        api_version: API version to use
-        maturity: API maturity level
-        generation: API generation
-
-    Returns:
-        A tuple containing:
-            - bool: True if zones match, False otherwise
-            - str: Current zone name
-
-    Raises:
-        ApiException: If there is an error checking zone compatibility
-    """
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
     ha_fail_over.apikey = api_key
@@ -755,7 +709,12 @@ def fail_over_check_par_zone_compatibility(
     if "zone" in instance_metadata:
         ha_fail_over.vsi_local_az = instance_metadata["zone"]["name"]
 
-    return ha_fail_over.check_par_zone_compatibility(range_id, api_version, maturity, generation)
+    return ha_fail_over.check_par_zone_compatibility(
+        range_id=range_id,
+        api_version=api_version,
+        maturity=maturity,
+        generation=generation
+    )
 
 def fail_over(cmd):
     """_summary_
@@ -806,20 +765,12 @@ def fail_over_floating_ip_stop(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key="")
     return fip_id, fip_ip
 
 
-def fail_over_floating_ip_start(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key=""):
-    """_summary_
-
-    Args:
-        vpc_url (_type_): _description_
-        vni_id_1 (_type_): _description_
-        vni_id_2 (_type_): _description_
-        fip_id (_type_): _description_
-        apy_key  (string)
-    """
+def fail_over_floating_ip_start(vpc_url, vni_id_1, vni_id_2, fip_id, api_key=""):
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
     ha_fail_over.apikey = api_key
-    instance_metadata = ha_fail_over.get_instance_metadata()
+    
+    # Get VNI metadata directly since we don't use instance metadata
     vni_metadata = ha_fail_over.get_vni_metadata()
     if "virtual_network_interfaces" in vni_metadata:
         for vni in vni_metadata["virtual_network_interfaces"]:
@@ -831,7 +782,7 @@ def fail_over_floating_ip_start(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key=""
                     remote_vni_id = vni_id_1
                 ha_fail_over.update_vpc_fip("remove", remote_vni_id, fip_id)
                 ha_fail_over.update_vpc_fip("add", local_vni_id, fip_id)
-    fip_id , fip_ip = fail_over_get_attached_fip(api_key)
+    fip_id, fip_ip = fail_over_get_attached_fip(api_key)
     return fip_id, fip_ip
 
 def fail_over_get_attached_fip(api_key):
