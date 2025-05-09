@@ -22,7 +22,7 @@ import http.client
 import json
 import socket
 from typing import Dict, Optional, Tuple, Any
-
+from os import environ as env
 from dotenv import load_dotenv
 from ibm_cloud_sdk_core import ApiException
 from ibm_cloud_sdk_core.authenticators import BearerTokenAuthenticator
