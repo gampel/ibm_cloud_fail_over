@@ -1,4 +1,4 @@
-    #!/usr/bin/env python3
+#!/usr/bin/env python3
 
 # Copyright 2024 Eran Gampel
 # Authors:      Eran Gampel , Jorge Hernández Ramírez
@@ -13,7 +13,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Module providing IBM Fail over functions ."""
+"""IBM Cloud Fail Over module.
+
+This module provides functions for handling failover operations in IBM Cloud VPC.
+"""
 import sys
 import json
 import http.client
@@ -23,21 +26,15 @@ from ibm_vpc import VpcV1
 from ibm_cloud_sdk_core.authenticators import BearerTokenAuthenticator
 from ibm_cloud_sdk_core import ApiException
 from dotenv import load_dotenv
+from typing import Dict, Optional, Tuple, Any
 
 
 load_dotenv("env")
 
 class HAFailOver():
-    """_summary_
+    """IBM Cloud Fail Over handler class.
 
-    Raises:
-        ApiException: _description_
-        ApiException: _description_
-        an: _description_
-        ApiException: _description_
-
-    Returns:
-        _type_: _description_
+    This class provides methods for handling failover operations in IBM Cloud VPC.
     """
     API_KEY = "API_KEY"
     VPC_ID = "VPC_ID"
@@ -67,9 +64,8 @@ class HAFailOver():
     DEBUG = True
     service = None
 
-    def __init__(self):
-        """_summary_
-        """
+    def __init__(self) -> None:
+        """Initialize the HAFailOver instance."""
         self.logger("--------Constructor---------")
         if self.apikey is None:
             self.logger("--------_parse_config")
@@ -572,28 +568,24 @@ class HAFailOver():
         response = json.loads(connection.getresponse().read().decode("utf-8"))
         return response
 
-    def update_public_address_range(self, range_id, api_version="2025-05-06", maturity="beta", generation="2"):
-        """Update the target zone of a public address range to match the VSI's local availability zone.
+    def get_public_address_range(self, range_id, api_version="2025-05-06", maturity="beta", generation="2"):
+        """Get information about a public address range.
 
         Args:
-            range_id (str): The ID of the public address range to update
+            range_id (str): The ID of the public address range to get
             api_version (str, optional): API version to use. Defaults to "2025-05-06".
             maturity (str, optional): API maturity level. Defaults to "beta".
             generation (str, optional): API generation. Defaults to "2".
 
         Returns:
-            dict: The updated public address range information if updated, None if no update needed
+            dict: The public address range information
 
         Raises:
-            ApiException: If there is an error updating the range
+            ApiException: If there is an error getting the range
         """
-        self.logger("Checking public address range target zone")
+        self.logger("Getting public address range information")
         self.logger("Range ID: " + range_id)
         self.logger("VPC_URL: " + self.vpc_url)
-
-        authenticator = BearerTokenAuthenticator(self.get_token())
-        #self.service = VpcV1(authenticator=authenticator)
-        #self.service.set_service_url(self.vpc_url)
 
         try:
             conn = http.client.HTTPSConnection(self.vpc_url.replace('https://', ''))
@@ -610,22 +602,85 @@ class HAFailOver():
             if response.status != 200:
                 raise ApiException(f"Failed to get public address range: {response.status} {response.reason}")
 
-            current_range = json.loads(response.read().decode("utf-8"))
-            #current_zone = current_range.get('vpc', {}).get('zone').get('name')
-            current_zone = current_range.get('target', {}).get('zone').get('name')
+            range_info = json.loads(response.read().decode("utf-8"))
+            self.logger(f"Range information: {range_info}")
+            return range_info
 
-            self.logger(f"Current range: {current_range}")
-            self.logger(f"Current zone: {current_zone}")
+        except ApiException as e:
+            self.logger(f"Error getting public address range: {e}")
+            raise
+        except Exception as e:
+            self.logger(f"Unexpected error: {e}")
+            raise ApiException(f"Unexpected error: {e}")
+        finally:
+            if 'conn' in locals():
+                conn.close()
+
+    def check_par_zone_compatibility(self, range_id, api_version="2025-05-06", maturity="beta", generation="2"):
+        """Check if the public address range and VSI are in the same zone.
+
+        Args:
+            range_id (str): The ID of the public address range to check
+            api_version (str, optional): API version to use. Defaults to "2025-05-06".
+            maturity (str, optional): API maturity level. Defaults to "beta".
+            generation (str, optional): API generation. Defaults to "2".
+
+        Returns:
+            tuple: (bool, str) - (True if zones match, current zone name)
+        """
+        self.logger("Checking zone compatibility")
+        
+        try:
+            range_info = self.get_public_address_range(range_id, api_version, maturity, generation)
+            current_zone = range_info.get('target', {}).get('zone', {}).get('name')
+            
+            self.logger(f"Current range zone: {current_zone}")
             self.logger(f"VSI local zone: {self.vsi_local_az}")
+            
+            zones_match = current_zone == self.vsi_local_az
+            return zones_match, current_zone
+            
+        except Exception as e:
+            self.logger(f"Error checking zone compatibility: {e}")
+            raise
 
-            if current_zone != self.vsi_local_az:
+    def update_public_address_range(self, range_id, api_version="2025-05-06", maturity="beta", generation="2"):
+        """Update the target zone of a public address range to match the VSI's local availability zone.
+
+        Args:
+            range_id (str): The ID of the public address range to update
+            api_version (str, optional): API version to use. Defaults to "2025-05-06".
+            maturity (str, optional): API maturity level. Defaults to "beta".
+            generation (str, optional): API generation. Defaults to "2".
+
+        Returns:
+            dict: The updated public address range information if updated, None if no update needed
+
+        Raises:
+            ApiException: If there is an error updating the range
+        """
+        self.logger("Checking public address range target zone")
+        
+        try:
+            zones_match, current_zone = self.check_par_zone_compatibility(range_id, api_version, maturity, generation)
+            
+            if not zones_match:
                 self.logger("Updating public address range target zone")
+                conn = http.client.HTTPSConnection(self.vpc_url.replace('https://', ''))
+                headers = {
+                    'Authorization': self.get_token(),
+                    'Content-Type': 'application/json',
+                    'X-IBM-Cloud-API-Version': api_version,
+                    'X-IBM-Cloud-Maturity': maturity,
+                    'X-IBM-Cloud-Generation': generation
+                }
+
                 range_patch_model = {
                     "target": {
-                    	"zone": {
+                        "zone": {
                             "name": self.vsi_local_az
-                    	}
-		    }
+                        }
+                    }
                 }
 
                 self.logger(f"Update range_patch_model: {range_patch_model}")
@@ -655,30 +710,38 @@ class HAFailOver():
             if 'conn' in locals():
                 conn.close()
 
-def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version="2025-05-06", maturity="beta", generation="2"):
-    """Update the target zone of a public address range to match the VSI's local availability zone.
+def fail_over_check_par_zone_compatibility(
+    range_id: str,
+    vpc_url: str = "",
+    api_key: str = "",
+    api_version: str = "2025-05-06",
+    maturity: str = "beta",
+    generation: str = "2"
+) -> Tuple[bool, str]:
+    """Check if the public address range and VSI are in the same zone.
 
     Args:
-        range_id (str): The ID of the public address range to update
-        vpc_url (str, optional): IBM Cloud VPC regional URL. Defaults to "".
-        api_key (str, optional): IBM Cloud API key. Defaults to "".
-        api_version (str, optional): API version to use. Defaults to "2025-05-06".
-        maturity (str, optional): API maturity level. Defaults to "beta".
-        generation (str, optional): API generation. Defaults to "2".
+        range_id: The ID of the public address range to check
+        vpc_url: IBM Cloud VPC regional URL
+        api_key: IBM Cloud API key
+        api_version: API version to use
+        maturity: API maturity level
+        generation: API generation
 
     Returns:
-        dict: The updated public address range information if updated, None if no update needed
+        A tuple containing:
+            - bool: True if zones match, False otherwise
+            - str: Current zone name
     """
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
     ha_fail_over.apikey = api_key
 
-    # Get instance metadata to set VSI local AZ
     instance_metadata = ha_fail_over.get_instance_metadata()
     if "zone" in instance_metadata:
         ha_fail_over.vsi_local_az = instance_metadata["zone"]["name"]
 
-    return ha_fail_over.update_public_address_range(range_id, api_version, maturity, generation)
+    return ha_fail_over.check_par_zone_compatibility(range_id, api_version, maturity, generation)
 
 def fail_over(cmd):
     """_summary_

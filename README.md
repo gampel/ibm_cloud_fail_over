@@ -178,6 +178,53 @@ print(result)
 - The range is only updated if its current zone differs from the VSI's local zone
 - Requires the same instance metadata service and trusted profile setup as other functions
 
+#### `fail_over_check_par_zone_compatibility`
+
+This function checks if a public address range and the VSI are in the same availability zone.
+
+**Usage:**
+
+```python
+from ibm_cloud_fail_over import fail_over_check_par_zone_compatibility
+
+# Example usage
+zones_match, current_zone = fail_over_check_par_zone_compatibility(
+    range_id="public_address_range_uuid",
+    vpc_url="IBM Cloud VPC regional URL",
+    api_key="Optional: API key",
+    api_version="2025-05-06",  # Optional: API version
+    maturity="beta",           # Optional: API maturity level
+    generation="2"             # Optional: API generation
+)
+
+if zones_match:
+    print(f"PAR and VSI are in the same zone: {current_zone}")
+else:
+    print(f"PAR and VSI are in different zones. PAR zone: {current_zone}")
+```
+
+**Parameters:**
+
+| Parameter          | Type     | Description                                      |
+|--------------------|----------|--------------------------------------------------|
+| `range_id`         | str(uuid)| The ID of the public address range to check      |
+| `vpc_url`          | str(url) | IBM Cloud VPC regional URL                       |
+| `api_key`          | str      | Optional: IBM Cloud API key (needed only if not using trusted profile) |
+| `api_version`      | str      | Optional: API version (defaults to "2025-05-06") |
+| `maturity`         | str      | Optional: API maturity level (defaults to "beta")|
+| `generation`       | str      | Optional: API generation (defaults to "2")       |
+
+**Returns:**
+
+- A tuple containing:
+  - `bool`: True if the public address range and VSI are in the same zone, False otherwise
+  - `str`: The current zone name of the public address range
+
+**Note:**
+- The function automatically detects the VSI's local availability zone
+- Requires the same instance metadata service and trusted profile setup as other functions
+- Useful for checking zone compatibility before performing failover operations
+
 ## Troubleshooting
 
 If you encounter issues while using the module, consider the following:
