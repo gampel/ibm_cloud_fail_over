@@ -17,16 +17,16 @@
 
 This module provides functions for handling failover operations in IBM Cloud VPC.
 """
-import sys
-import json
+
 import http.client
+import json
 import socket
-from os import environ as env
-from ibm_vpc import VpcV1
-from ibm_cloud_sdk_core.authenticators import BearerTokenAuthenticator
-from ibm_cloud_sdk_core import ApiException
-from dotenv import load_dotenv
 from typing import Dict, Optional, Tuple, Any
+
+from dotenv import load_dotenv
+from ibm_cloud_sdk_core import ApiException
+from ibm_cloud_sdk_core.authenticators import BearerTokenAuthenticator
+from ibm_vpc import VpcV1
 
 
 load_dotenv("env")
@@ -616,6 +616,56 @@ class HAFailOver():
             if 'conn' in locals():
                 conn.close()
 
+    def _update_range_zone(self, range_id, api_version, maturity, generation):
+        """Update the zone of a public address range.
+
+        Args:
+            range_id: The ID of the public address range to update
+            api_version: API version to use
+            maturity: API maturity level
+            generation: API generation
+
+        Returns:
+            dict: The updated public address range information
+
+        Raises:
+            ApiException: If there is an error updating the range
+        """
+        self.logger("Updating public address range target zone")
+        conn = http.client.HTTPSConnection(self.vpc_url.replace('https://', ''))
+        try:
+            headers = {
+                'Authorization': self.get_token(),
+                'Content-Type': 'application/json',
+                'X-IBM-Cloud-API-Version': api_version,
+                'X-IBM-Cloud-Maturity': maturity,
+                'X-IBM-Cloud-Generation': generation
+            }
+
+            range_patch_model = {
+                "target": {
+                    "zone": {
+                        "name": self.vsi_local_az
+                    }
+                }
+            }
+
+            self.logger(f"Update range_patch_model: {range_patch_model}")
+            conn.request("PATCH",
+                        f"/v1/public_address_ranges/{range_id}?version={api_version}&generation={generation}&maturity=beta",
+                        body=json.dumps(range_patch_model),
+                        headers=headers)
+
+            response = conn.getresponse()
+            if response.status != 200:
+                raise ApiException(f"Failed to update public address range: {response.status} {response.reason}")
+            updated_range = json.loads(response.read().decode("utf-8"))
+            self.logger(f"Update response: {updated_range}")
+            self.logger("Successfully updated public address range")
+            return updated_range
+        finally:
+            conn.close()
+
     def check_par_zone_compatibility(
         self,
         range_id: str,
@@ -649,7 +699,7 @@ class HAFailOver():
             return zones_match, current_zone
         except Exception as e:
             self.logger(f"Error checking zone compatibility: {e}")
-            raise ApiException(f"Error checking zone compatibility: {e}")
+            raise ApiException(f"Error checking zone compatibility: {e}") from e
 
     def update_public_address_range(self, range_id, api_version="2025-05-06",
                                   maturity="beta", generation="2"):
@@ -685,6 +735,58 @@ class HAFailOver():
             if 'conn' in locals():
                 conn.close()
 
+    def _process_route(self, route, table_id_temp, cmd, ingress_routing_table):
+        """Process a single route.
+
+        Args:
+            route: Route to process
+            table_id_temp: Table ID
+            cmd: Command to execute
+            ingress_routing_table: Whether this is an ingress routing table
+
+        Returns:
+            str: Next hop VSI if found
+        """
+        route_id_temp = route["id"]
+        self.logger(f"Route ID: {route['id']}")
+        
+        if not (route["next_hop"]["address"] == self.ext_ip_1 or 
+                route["next_hop"]["address"] == self.ext_ip_2):
+            return None
+
+        if cmd == "GET":
+            self.logger("GET Command")
+            print(route["next_hop"]["address"])
+            return route["next_hop"]["address"]
+
+        self.find_the_current_and_next_hop_ip(route["next_hop"]["address"])
+        self._update_route(route, route_id_temp, table_id_temp, ingress_routing_table)
+        return self.update_next_hop_vsi
+
+    def _update_route(self, route, route_id_temp, table_id_temp, ingress_routing_table):
+        """Update a route.
+
+        Args:
+            route: Route to update
+            route_id_temp: Route ID
+            table_id_temp: Table ID
+            ingress_routing_table: Whether this is an ingress routing table
+        """
+        route_next_hop_prototype_model = {"address": self.update_next_hop_vsi}
+        route_patch_model = {
+            "advertise": route["advertise"],
+            "name": route["name"],
+            "next_hop": route_next_hop_prototype_model,
+            "priority": route["priority"]
+        }
+        zone_identity_model = {"name": route["zone"]["name"]}
+
+        if route["zone"]["name"] == self.vsi_local_az or not ingress_routing_table:
+            self._update_existing_route(route_id_temp, table_id_temp, route_patch_model)
+        else:
+            self._create_new_route(route, table_id_temp, route_next_hop_prototype_model, 
+                                 zone_identity_model, route_patch_model)
+
 def fail_over_check_par_zone_compatibility(
     range_id: str,
     vpc_url: str = "",
@@ -693,6 +795,21 @@ def fail_over_check_par_zone_compatibility(
     maturity: str = "beta",
     generation: str = "2"
 ) -> Tuple[bool, str]:
+    """Check if the public address range and VSI are in the same zone.
+
+    Args:
+        range_id: The ID of the public address range to check
+        vpc_url: IBM Cloud VPC regional URL
+        api_key: IBM Cloud API key
+        api_version: API version to use
+        maturity: API maturity level
+        generation: API generation
+
+    Returns:
+        A tuple containing:
+            - bool: True if zones match, False otherwise
+            - str: Current zone name
+    """
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
     ha_fail_over.apikey = api_key
@@ -734,15 +851,15 @@ def fail_over_fip(cmd, vni_id, fip_id):
     ha_fail_over = HAFailOver()
     ha_fail_over.update_vpc_fip(cmd, vni_id, fip_id)
 
-def fail_over_floating_ip_stop(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key=""):
-    """_summary_
+def fail_over_floating_ip_stop(vpc_url, vni_id_1, vni_id_2, fip_id, api_key=""):
+    """Stop floating IP failover.
 
     Args:
-        vpc_url (_type_): _description_
-        vni_id_1 (_type_): _description_
-        vni_id_2 (_type_): _description_
-        fip_id (_type_): _description_
-        apy_key  (string)
+        vpc_url: IBM Cloud VPC regional URL
+        vni_id_1: First VNI ID
+        vni_id_2: Second VNI ID
+        fip_id: Floating IP ID
+        api_key: IBM Cloud API key
     """
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
@@ -753,7 +870,7 @@ def fail_over_floating_ip_stop(vpc_url, vni_id_1, vni_id_2 , fip_id, api_key="")
             if vni["id"] == vni_id_1 or vni["id"] == vni_id_2:
                 local_vni_id = vni["id"]
                 ha_fail_over.update_vpc_fip("remove", local_vni_id, fip_id)
-    fip_id , fip_ip = fail_over_get_attached_fip()
+    fip_id, fip_ip = fail_over_get_attached_fip(api_key)
     return fip_id, fip_ip
 
 
