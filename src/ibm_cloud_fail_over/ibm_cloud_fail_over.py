@@ -842,6 +842,76 @@ class HAFailOver():
             self.logger(f"Error creating new route: {e}")
             raise ApiException(f"Error creating new route: {e}") from e
 
+def get_next_hop_for_par(range_id: str, vpc_url: str = "", api_key: str = "", 
+                        api_version: str = "2025-05-06", maturity: str = "beta", 
+                        generation: str = "2") -> str:
+    """Get the next hop IP address for a custom route associated with a public address range.
+
+    Args:
+        range_id (str): The ID of the public address range
+        vpc_url (str, optional): IBM Cloud VPC regional URL. Defaults to "".
+        api_key (str, optional): IBM Cloud API key. Defaults to "".
+        api_version (str, optional): API version to use. Defaults to "2025-05-06".
+        maturity (str, optional): API maturity level. Defaults to "beta".
+        generation (str, optional): API generation. Defaults to "2".
+
+    Returns:
+        str: The next hop IP address for the custom route associated with the public address range
+
+    Raises:
+        ApiException: If there is an error getting the next hop
+    """
+    ha_fail_over = HAFailOver()
+    ha_fail_over.vpc_url = vpc_url
+    ha_fail_over.apikey = api_key
+
+    # Get instance metadata to set VSI local AZ
+    instance_metadata = ha_fail_over.get_instance_metadata()
+    if "zone" in instance_metadata:
+        ha_fail_over.vsi_local_az = instance_metadata["zone"]["name"]
+    if "vpc" in instance_metadata:
+        ha_fail_over.vpc_id = instance_metadata["vpc"]["id"]
+
+    # Get the public address range information
+    range_info = ha_fail_over.get_public_address_range(range_id, api_version, maturity, generation)
+    
+    # Get the CIDR from the range info
+    cidr = range_info.get('cidr')
+    if not cidr:
+        raise ApiException(f"No CIDR found for public address range {range_id}")
+
+    # Initialize VPC service
+    authenticator = BearerTokenAuthenticator(ha_fail_over.get_token())
+    ha_fail_over.service = VpcV1(authenticator=authenticator)
+    ha_fail_over.service.set_service_url(ha_fail_over.vpc_url)
+
+    try:
+        # Get all routing tables
+        list_tables = ha_fail_over.service.list_vpc_routing_tables(ha_fail_over.vpc_id).get_result()
+        if not list_tables or "routing_tables" not in list_tables:
+            raise ApiException(f"No routing tables found for VPC {ha_fail_over.vpc_id}")
+
+        # Search through all routing tables and routes
+        for table in list_tables["routing_tables"]:
+            table_id = table["id"]
+            routes = ha_fail_over.service.list_vpc_routing_table_routes(
+                vpc_id=ha_fail_over.vpc_id,
+                routing_table_id=table_id
+            ).get_result()["routes"]
+
+            # Look for route matching the CIDR
+            for route in routes:
+                if route["destination"] == cidr:
+                    next_hop = route["next_hop"]["address"]
+                    ha_fail_over.logger(f"Found next hop {next_hop} for CIDR {cidr}")
+                    return next_hop
+
+        raise ApiException(f"No custom route found for CIDR {cidr} in public address range {range_id}")
+
+    except ApiException as e:
+        ha_fail_over.logger(f"Error getting next hop: {e}")
+        raise ApiException(f"Error getting next hop: {e}") from e
+
 def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version="2025-05-06", maturity="beta", generation="2"):
     """Update the target zone of a public address range to match the VSI's local availability zone.
 
