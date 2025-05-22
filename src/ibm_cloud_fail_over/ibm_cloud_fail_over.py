@@ -28,7 +28,6 @@ from os import environ as env
 from dotenv import load_dotenv
 from ibm_cloud_sdk_core import ApiException
 from ibm_cloud_sdk_core.authenticators import BearerTokenAuthenticator
-from ibm_vpc import VpcV1
 
 
 load_dotenv("env")
@@ -51,6 +50,7 @@ class HAFailOver():
     METADATA_INSTACE_PATH = "/metadata/v1/instance"
     METADATA_INSTACE_NETWORK_INT_PATH = "/metadata/v1/instance/network_interfaces"
     METADATA_VNI_PATH = "/metadata/v1/virtual_network_interfaces"
+    API_VERSION = "2025-05-06"
     apikey = None
     vpc_url = ""
     vpc_id = ""
@@ -64,7 +64,6 @@ class HAFailOver():
     vsi_local_az = ""
     DEBUG = False
     #DEBUG = True
-    service = None
 
     def __init__(self) -> None:
         """Initialize the HAFailOver instance."""
@@ -72,11 +71,174 @@ class HAFailOver():
         if self.apikey is None:
             self.logger("--------_parse_config")
             self._parse_config()
-        # authenticator = IAMAuthenticator(self.apikey, url='https://iam.cloud.ibm.com')
-        # self.service = VpcV1(authenticator=authenticator)
-        # self.service.set_service_url(self.vpc_url)
-        # access_token = self.get_token()
-        # self.logger("Initialized VPC service!!" + access_token)
+
+    def _make_api_request(self, method: str, path: str, headers: dict = None, body: str = None) -> dict:
+        """Make an API request to the VPC API.
+
+        Args:
+            method (str): HTTP method (GET, POST, PATCH, DELETE)
+            path (str): API path
+            headers (dict, optional): Additional headers. Defaults to None.
+            body (str, optional): Request body. Defaults to None.
+
+        Returns:
+            dict: API response
+
+        Raises:
+            ApiException: If the API request fails
+        """
+        try:
+            vpc_host = self.vpc_url.replace('https://', '')
+            conn = http.client.HTTPSConnection(vpc_host)
+            
+            # Set up default headers
+            default_headers = {
+                'Authorization': self.get_token(),
+                'Content-Type': 'application/json',
+                'X-IBM-Cloud-API-Version': self.API_VERSION,
+                'X-IBM-Cloud-Maturity': 'beta',
+                'X-IBM-Cloud-Generation': '2'
+            }
+            
+            # Merge with additional headers if provided
+            if headers:
+                default_headers.update(headers)
+
+            # Make the request
+            conn.request(method, path, body=body, headers=default_headers)
+            response = conn.getresponse()
+            
+            # Read and parse response
+            response_data = response.read().decode("utf-8")
+            
+            if response.status != 200:
+                raise ApiException(f"API request failed: {response.status} {response.reason}\nResponse: {response_data}")
+                
+            return json.loads(response_data) if response_data else {}
+            
+        except Exception as e:
+            raise ApiException(f"Error making API request: {str(e)}") from e
+        finally:
+            if 'conn' in locals():
+                conn.close()
+
+    def update_vpc_fip(self, cmd, vni_id, fip_id):
+        """Update floating IP attachment.
+
+        Args:
+            cmd (str): 'add' or 'remove'
+            vni_id (str): VNI ID
+            fip_id (str): Floating IP ID
+        """
+        self.logger("Calling update vpc routing table route method VIP.")
+        self.logger(f"VPC ID: {self.vpc_id}")
+        self.logger(f"VPC URL: {self.vpc_url}")
+        self.logger(f"VPC self.api_key: {str(self.apikey)}")
+        self.logger(f"cmd: {cmd}")
+
+        try:
+            if cmd == "remove":
+                self._make_api_request(
+                    "DELETE",
+                    f"/v1/network_interfaces/{vni_id}/floating_ips/{fip_id}?version={self.API_VERSION}&generation=2&maturity=beta"
+                )
+            if cmd == "add":
+                self._make_api_request(
+                    "PUT",
+                    f"/v1/network_interfaces/{vni_id}/floating_ips/{fip_id}?version={self.API_VERSION}&generation=2&maturity=beta"
+                )
+            return True
+        except ApiException as e:
+            self.logger(f"Error updating floating IP: {e}")
+            raise
+
+    def update_vpc_routing_table_route(self, cmd):
+        """Update VPC routing table route.
+
+        Args:
+            cmd (str): 'SET' or 'GET'
+
+        Returns:
+            str: Updated next hop IP
+        """
+        self.logger("Calling update vpc routing table route method VIP.")
+        self.logger(f"VPC ID: {self.vpc_id}")
+        self.logger(f"VPC URL: {self.vpc_url}")
+        self.logger(f"VPC self.ext_ip_1: {self.ext_ip_1}")
+        self.logger(f"VPC self.ext_ip_2: {self.ext_ip_2}")
+        self.logger(f"VPC self.api_key: {str(self.apikey)}")
+
+        try:
+            # Get all routing tables
+            list_tables = self._make_api_request(
+                "GET",
+                f"/v1/vpcs/{self.vpc_id}/routing_tables?version={self.API_VERSION}&generation=2&maturity=beta"
+            )
+
+            if not list_tables or "routing_tables" not in list_tables:
+                raise ApiException(f"No routing tables found for VPC {self.vpc_id}")
+
+            # Process each routing table
+            for table in list_tables["routing_tables"]:
+                ingress_routing_table = table.get("route_direct_link_ingress") or table.get("route_transit_gateway_ingress")
+                table_id = table["id"]
+                
+                # Get routes for this table
+                routes = self._make_api_request(
+                    "GET",
+                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=beta"
+                )["routes"]
+
+                # Process each route
+                for route in routes:
+                    if route["next_hop"]["address"] in [self.ext_ip_1, self.ext_ip_2]:
+                        if cmd == "GET":
+                            return route["next_hop"]["address"]
+
+                        self.find_the_current_and_next_hop_ip(route["next_hop"]["address"])
+                        
+                        # Update or create route based on zone
+                        if route["zone"]["name"] == self.vsi_local_az or not ingress_routing_table:
+                            # Update existing route
+                            route_patch = {
+                                "advertise": route["advertise"],
+                                "name": route["name"],
+                                "next_hop": {"address": self.update_next_hop_vsi},
+                                "priority": route["priority"]
+                            }
+                            
+                            self._make_api_request(
+                                "PATCH",
+                                f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2&maturity=beta",
+                                body=json.dumps(route_patch)
+                            )
+                        else:
+                            # Delete and create new route
+                            self._make_api_request(
+                                "DELETE",
+                                f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2&maturity=beta"
+                            )
+                            
+                            new_route = {
+                                "destination": route["destination"],
+                                "zone": {"name": self.vsi_local_az} if self.vsi_local_az else route["zone"],
+                                "action": "deliver",
+                                "next_hop": {"address": self.update_next_hop_vsi},
+                                "name": route["name"],
+                                "advertise": route["advertise"]
+                            }
+                            
+                            self._make_api_request(
+                                "POST",
+                                f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=beta",
+                                body=json.dumps(new_route)
+                            )
+
+            return self.update_next_hop_vsi
+
+        except ApiException as e:
+            self.logger(f"Error updating routing table route: {e}")
+            raise
 
     def get_token(self):
         """Get Token
@@ -350,164 +512,6 @@ class HAFailOver():
         except ApiException as e:
             self.logger(e)
 
-    def update_vpc_fip(self, cmd, vni_id, fip_id):
-        """_summary_
-
-        Args:
-            cmd (_type_): add or remove
-            vni_id (_type_): vni uuid
-            fip_id (_type_): fip uuid
-
-        Returns:
-            _type_: _description_
-        """
-        self.logger("Calling update vpc routing table route method VIP.")
-        self.logger("VPC ID: " + self.vpc_id)
-        self.logger("VPC URL: " + self.vpc_url)
-        self.logger("VPC self.api_key: " + str(self.apikey))
-        self.logger("cmd: " + cmd)
-        authenticator = BearerTokenAuthenticator(self.get_token())
-        self.service = VpcV1(authenticator=authenticator)
-        self.service.set_service_url(self.vpc_url)
-        ret = ""
-        try:
-            if cmd == "remove":
-                ret = self.service.remove_network_interface_floating_ip(
-                    vni_id, fip_id
-                ).get_result()
-            if cmd == "add":
-                ret = self.service.add_network_interface_floating_ip(
-                    vni_id, fip_id
-                ).get_result()
-        except ApiException as e:
-            print(e)
-        print(ret)
-        return True
-
-    def update_vpc_routing_table_route(self, cmd):
-        """_summary_
-
-        Args:
-            cmd (_type_): SET or GET
-
-        Returns:
-            _type_: _description_
-        """
-        self.logger("Calling update vpc routing table route method VIP.")
-        self.logger("VPC ID: " + self.vpc_id)
-        self.logger("VPC URL: " + self.vpc_url)
-        self.logger("VPC self.ext_ip_1: " + self.ext_ip_1)
-        self.logger("VPC self.ext_ip_2: " + self.ext_ip_2)
-        self.logger("VPC self.api_key: " + str(self.apikey))
-        list_tables = ""
-        authenticator = BearerTokenAuthenticator(self.get_token())
-        self.service = VpcV1(authenticator=authenticator)
-        self.service.set_service_url(self.vpc_url)
-        try:
-            if (
-                self.service.list_vpc_routing_tables(self.vpc_id).get_result()
-                is not None
-            ):
-                list_tables = self.service.list_vpc_routing_tables(
-                    self.vpc_id
-                ).get_result()["routing_tables"]
-        except ApiException as e:
-            print(e)
-            return self.update_next_hop_vsi
-        self.logger("Iterating through below Table Name and Table ID!!")
-        self.logger(list_tables)
-        for table in list_tables:
-            ingress_routing_table = False
-            self.logger("Name: " + table["name"] + "\tID: " + table["id"])
-            table_id_temp = table["id"]
-            if (
-                table["route_direct_link_ingress"]
-                or table["route_transit_gateway_ingress"]
-            ):
-                ingress_routing_table = True
-            list_routes = self.service.list_vpc_routing_table_routes(
-                vpc_id=self.vpc_id, routing_table_id=table_id_temp
-            )
-            routes = list_routes.get_result()["routes"]
-            for route in routes:
-                route_id_temp = route["id"]
-                self.logger("Route ID: " + route["id"])
-                self.logger(
-                    "Next hop address of above Route ID: " + str(route["next_hop"])
-                )
-                if (
-                    route["next_hop"]["address"] == self.ext_ip_1
-                    or route["next_hop"]["address"] == self.ext_ip_2
-                ):
-                    if cmd == "GET":
-                        self.logger("GET Command")
-                        print(route["next_hop"]["address"])
-                        return route["next_hop"]["address"]
-                    self.find_the_current_and_next_hop_ip(route["next_hop"]["address"])
-                    self.logger(f"VPC routing table route found!!, ID: {route['id']}, "
-                                f"Name: {route['name']}, zone: {route['zone']['name']}, "
-                                f"Next_Hop: {route['next_hop']['address']}, "
-                                f"Destination: {route['destination']}")
-                    self.logger(route)
-                    route_next_hop_prototype_model = {
-                        "address": self.update_next_hop_vsi
-                    }
-                    # Construct a dict representation of a RoutePatch model
-                    route_patch_model = {}
-                    route_patch_model["advertise"] = route["advertise"]
-                    route_patch_model["name"] = route["name"]
-                    route_patch_model["next_hop"] = route_next_hop_prototype_model
-                    route_patch_model["priority"] = route["priority"]
-                    zone_identity_model = {"name": route["zone"]["name"]}
-                    # for same AZ failover we can patch the nexthop using update
-                    if (
-                        route["zone"]["name"] == self.vsi_local_az
-                        or not ingress_routing_table
-                    ):
-                        self.logger("Update old route: " + route_id_temp)
-                        self.logger("Same AZ Fail over AZ: " + self.vsi_local_az)
-                        update_vpc_routing_table_route_response = (
-                            self.service.update_vpc_routing_table_route(
-                                vpc_id=self.vpc_id,
-                                routing_table_id=table_id_temp,
-                                id=route_id_temp,
-                                route_patch=route_patch_model,
-                            )
-                        )
-                        result = update_vpc_routing_table_route_response.get_result()
-                        self.logger("Update old route result: ")
-                        self.logger(result)
-                    else:
-                        # Delete old route
-                        try:
-                            if self.vsi_local_az != "":
-                                zone_identity_model = {"name": self.vsi_local_az}
-                            self.service.delete_vpc_routing_table_route(
-                                vpc_id=self.vpc_id,
-                                routing_table_id=table_id_temp,
-                                id=route_id_temp,
-                            )
-                            self.logger("Deleted old route: " + route_id_temp)
-                            # Create new route
-                            create_vpc_routing_table_route_response = (
-                                self.service.create_vpc_routing_table_route(
-                                    vpc_id=self.vpc_id,
-                                    routing_table_id=table_id_temp,
-                                    destination=route["destination"],
-                                    zone=zone_identity_model,
-                                    action="deliver",
-                                    next_hop=route_next_hop_prototype_model,
-                                    name=route["name"],
-                                    advertise=route["advertise"],
-                                )
-                            )
-                            route = create_vpc_routing_table_route_response.get_result()
-                            self.logger("Created new route: " + route["id"])
-                        except ApiException as e:
-                            print(e)
-
-        return self.update_next_hop_vsi
-
     def logger(self, message):
         """_summary_
 
@@ -562,6 +566,106 @@ class HAFailOver():
                            headers=self._get_metadata_headers_iam(metadata_token))
         response = json.loads(connection.getresponse().read().decode("utf-8"))
         return response
+
+    def get_next_hop_for_cidr(self, cidr: str, api_version: str = "2025-05-06", 
+                             maturity: str = "beta", generation: str = "2") -> str:
+        """Get the next hop IP address for a given CIDR in the internet ingress routing table.
+
+        Args:
+            cidr (str): The CIDR to search for in routing tables
+            api_version (str, optional): API version to use. Defaults to "2025-05-06".
+            maturity (str, optional): API maturity level. Defaults to "beta".
+            generation (str, optional): API generation. Defaults to "2".
+
+        Returns:
+            str: The next hop IP address for the route matching the CIDR, or None if not found
+
+        Raises:
+            ApiException: If there is an error getting the next hop
+        """
+        self.logger(f"Getting next hop for CIDR: {cidr}")
+        self.logger(f"VPC ID: {self.vpc_id}")
+        self.logger(f"VPC URL: {self.vpc_url}")
+
+        try:
+            # Get all routing tables
+            list_tables = self._make_api_request(
+                "GET",
+                f"/v1/vpcs/{self.vpc_id}/routing_tables?version={api_version}&generation={generation}&maturity={maturity}"
+            )
+
+            if not list_tables or "routing_tables" not in list_tables:
+                raise ApiException(f"No routing tables found for VPC {self.vpc_id}")
+
+            # Search through routing tables
+            for table in list_tables["routing_tables"]:
+                # Check if this is an internet ingress routing table
+                if table.get("route_internet_ingress"):
+                    self.logger(f"Found internet ingress routing table: {table['name']} (ID: {table['id']})")
+                    table_id = table["id"]
+                    
+                    # Get all routes in this table
+                    routes = self._make_api_request(
+                        "GET",
+                        f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={api_version}&generation={generation}&maturity={maturity}"
+                    )["routes"]
+
+                    # Check each route for the CIDR
+                    for route in routes:
+                        self.logger(f"Checking route: {route['name']} (ID: {route['id']})")
+                        self.logger(f"Route destination: {route['destination']}")
+                        
+                        if route["destination"] == cidr:
+                            next_hop = route["next_hop"]["address"]
+                            self.logger(f"Found next hop {next_hop} for CIDR {cidr}")
+                            return next_hop
+
+            self.logger(f"No route found for CIDR {cidr}")
+            return None
+
+        except ApiException as e:
+            self.logger(f"Error getting next hop: {e}")
+            raise ApiException(f"Error getting next hop: {e}") from e
+
+    def get_next_hop_for_par(self, range_id: str, api_version: str = "2025-05-06", 
+                            maturity: str = "beta", generation: str = "2") -> str:
+        """Get the next hop IP address for a public address range.
+
+        Args:
+            range_id (str): The ID of the public address range
+            api_version (str, optional): API version to use. Defaults to "2025-05-06".
+            maturity (str, optional): API maturity level. Defaults to "beta".
+            generation (str, optional): API generation. Defaults to "2".
+
+        Returns:
+            str: The next hop IP address for the route, or None if not found
+
+        Raises:
+            ApiException: If there is an error getting the next hop
+        """
+        self.logger(f"Getting next hop for public address range: {range_id}")
+
+        try:
+            # Get the public address range information
+            range_info = self.get_public_address_range(range_id, api_version, maturity, generation)
+            
+            # Get the CIDR from the range info
+            cidr = range_info.get('cidr')
+            if not cidr:
+                raise ApiException(f"No CIDR found for public address range {range_id}")
+
+            # First try to find a specific route for the CIDR
+            next_hop = self.get_next_hop_for_cidr(cidr, api_version, maturity, generation)
+            if next_hop:
+                return next_hop
+
+            # If no specific route found, look for default route (0.0.0.0/0)
+            self.logger("No specific route found, checking for default route")
+            return self.get_next_hop_for_cidr("0.0.0.0/0", api_version, maturity, generation)
+
+        except ApiException as e:
+            self.logger(f"Error getting next hop for public address range: {e}")
+            raise ApiException(f"Error getting next hop for public address range: {e}") from e
 
     def get_public_address_range(self, range_id, api_version="2025-05-06", maturity="beta", generation="2"):
         """Get information about a public address range.
@@ -719,133 +823,95 @@ class HAFailOver():
             self.logger(f"Unexpected error: {e}")
             raise ApiException(f"Unexpected error: {e}") from e
 
-    def _process_route(self, route, table_id_temp, cmd, ingress_routing_table):
-        """Process a single route.
+    def check_next_hop_in_internet_ingress(self, next_hop_ip: str) -> bool:
+        """Check if a specific next hop IP is used in the internet ingress routing table.
 
         Args:
-            route: The route to process
-            table_id_temp: The table ID
-            cmd: The command to execute
-            ingress_routing_table: Whether this is an ingress routing table
+            next_hop_ip (str): The next hop IP address to check for
 
         Returns:
-            str: The updated next hop IP if found
+            bool: True if the next hop IP is found in the internet ingress routing table, False otherwise
+
+        Raises:
+            ApiException: If there is an error checking the routing tables
         """
-        route_id_temp = route["id"]
-        self.logger(f"Route ID: {route['id']}")
+        self.logger("Checking next hop in internet ingress routing table")
+        self.logger(f"Next hop IP to check: {next_hop_ip}")
+        self.logger(f"VPC ID: {self.vpc_id}")
+        self.logger(f"VPC URL: {self.vpc_url}")
 
-        if not (route["next_hop"]["address"] == self.ext_ip_1 or
-                route["next_hop"]["address"] == self.ext_ip_2):
-            return None
-
-        if cmd == "GET":
-            self.logger("GET Command")
-            print(route["next_hop"]["address"])
-            return route["next_hop"]["address"]
-
-        self.find_the_current_and_next_hop_ip(route["next_hop"]["address"])
-        self._update_route(route, route_id_temp, table_id_temp, ingress_routing_table)
-        return self.update_next_hop_vsi
-
-    def _update_route(self, route, route_id_temp, table_id_temp, ingress_routing_table):
-        """Update a route.
-
-        Args:
-            route: Route to update
-            route_id_temp: Route ID
-            table_id_temp: Table ID
-            ingress_routing_table: Whether this is an ingress routing table
-        """
-        route_next_hop_prototype_model = {"address": self.update_next_hop_vsi}
-        route_patch_model = {
-            "advertise": route["advertise"],
-            "name": route["name"],
-            "next_hop": route_next_hop_prototype_model,
-            "priority": route["priority"]
-        }
-        zone_identity_model = {"name": route["zone"]["name"]}
-
-        if route["zone"]["name"] == self.vsi_local_az or not ingress_routing_table:
-            self._update_existing_route(route_id_temp, table_id_temp, route_patch_model)
-        else:
-            self._create_new_route(route, table_id_temp, route_next_hop_prototype_model,
-                                 zone_identity_model, route_patch_model)
-
-    def _update_existing_route(self, route_id_temp, table_id_temp, route_patch_model):
-        """Update an existing route.
-
-        Args:
-            route_id_temp: Route ID to update
-            table_id_temp: Table ID containing the route
-            route_patch_model: Model containing the route updates
-
-        Returns:
-            dict: The updated route information
-        """
-        self.logger(f"Update old route: {route_id_temp}")
-        self.logger(f"Same AZ Fail over AZ: {self.vsi_local_az}")
-        update_vpc_routing_table_route_response = (
-            self.service.update_vpc_routing_table_route(
-                vpc_id=self.vpc_id,
-                routing_table_id=table_id_temp,
-                id=route_id_temp,
-                route_patch=route_patch_model,
-            )
-        )
-        result = update_vpc_routing_table_route_response.get_result()
-        self.logger("Update old route result: ")
-        self.logger(result)
-        return result
-
-    def _create_new_route(self, route, table_id_temp, route_models):
-        """Create a new route.
-
-        Args:
-            route: Original route information
-            table_id_temp: Table ID to create the route in
-            route_models: Dictionary containing all route-related models:
-                - next_hop: Model for the next hop
-                - zone: Model for the zone
-                - patch: Model containing the route updates
-
-        Returns:
-            dict: The created route information
-        """
         try:
-            if self.vsi_local_az != "":
-                route_models['zone'] = {"name": self.vsi_local_az}
+            # Get token for authentication
+            token = self.get_token()
+            
+            # Set up HTTP connection
+            vpc_host = self.vpc_url.replace('https://', '')
+            conn = http.client.HTTPSConnection(vpc_host)
+            
+            # Set up headers
+            headers = {
+                'Authorization': token,
+                'Content-Type': 'application/json',
+                'X-IBM-Cloud-API-Version': self.API_VERSION,
+                'X-IBM-Cloud-Maturity': 'beta',
+                'X-IBM-Cloud-Generation': '2'
+            }
 
-            self.service.delete_vpc_routing_table_route(
-                vpc_id=self.vpc_id,
-                routing_table_id=table_id_temp,
-                id=route["id"],
-            )
-            self.logger(f"Deleted old route: {route['id']}")
+            # Get all routing tables
+            self.logger("Getting routing tables...")
+            conn.request("GET", f"/v1/vpcs/{self.vpc_id}/routing_tables?version={self.API_VERSION}&generation=2&maturity=beta", 
+                        headers=headers)
+            response = conn.getresponse()
+            
+            if response.status != 200:
+                raise ApiException(f"Failed to get routing tables: {response.status} {response.reason}")
+                
+            list_tables = json.loads(response.read().decode("utf-8"))
+            
+            if not list_tables or "routing_tables" not in list_tables:
+                raise ApiException(f"No routing tables found for VPC {self.vpc_id}")
 
-            # Create new route
-            create_vpc_routing_table_route_response = (
-                self.service.create_vpc_routing_table_route(
-                    vpc_id=self.vpc_id,
-                    routing_table_id=table_id_temp,
-                    destination=route["destination"],
-                    zone=route_models['zone'],
-                    action="deliver",
-                    next_hop=route_models['next_hop'],
-                    name=route["name"],
-                    advertise=route["advertise"],
-                )
-            )
-            new_route = create_vpc_routing_table_route_response.get_result()
-            self.logger(f"Created new route: {new_route['id']}")
-            return new_route
+            # Search through routing tables
+            for table in list_tables["routing_tables"]:
+                # Check if this is an internet ingress routing table
+                if table.get("route_internet_ingress"):
+                    self.logger(f"Found internet ingress routing table: {table['name']} (ID: {table['id']})")
+                    table_id = table["id"]
+                    
+                    # Get all routes in this table
+                    conn.request("GET", 
+                               f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=beta",
+                               headers=headers)
+                    response = conn.getresponse()
+                    
+                    if response.status != 200:
+                        raise ApiException(f"Failed to get routes: {response.status} {response.reason}")
+                        
+                    routes = json.loads(response.read().decode("utf-8"))["routes"]
+
+                    # Check each route for the next hop IP
+                    for route in routes:
+                        self.logger(f"Checking route: {route['name']} (ID: {route['id']})")
+                        self.logger(f"Route next hop: {route['next_hop']['address']}")
+                        
+                        if route["next_hop"]["address"] == next_hop_ip:
+                            self.logger(f"Found matching next hop {next_hop_ip} in route {route['id']}")
+                            return True
+
+            self.logger(f"Next hop {next_hop_ip} not found in any internet ingress routing table")
+            return False
+
         except ApiException as e:
-            self.logger(f"Error creating new route: {e}")
-            raise ApiException(f"Error creating new route: {e}") from e
+            self.logger(f"Error checking next hop in internet ingress routing table: {e}")
+            raise ApiException(f"Error checking next hop in internet ingress routing table: {e}") from e
+        except Exception as e:
+            self.logger(f"Unexpected error: {e}")
+            raise ApiException(f"Unexpected error: {e}") from e
 
 def get_next_hop_for_par(range_id: str, vpc_url: str = "", api_key: str = "", 
                         api_version: str = "2025-05-06", maturity: str = "beta", 
                         generation: str = "2") -> str:
-    """Get the next hop IP address for a custom route associated with a public address range.
+    """Get the next hop IP address for a public address range.
 
     Args:
         range_id (str): The ID of the public address range
@@ -856,7 +922,7 @@ def get_next_hop_for_par(range_id: str, vpc_url: str = "", api_key: str = "",
         generation (str, optional): API generation. Defaults to "2".
 
     Returns:
-        str: The next hop IP address for the custom route associated with the public address range
+        str: The next hop IP address for the route, or None if not found
 
     Raises:
         ApiException: If there is an error getting the next hop
@@ -865,52 +931,12 @@ def get_next_hop_for_par(range_id: str, vpc_url: str = "", api_key: str = "",
     ha_fail_over.vpc_url = vpc_url
     ha_fail_over.apikey = api_key
 
-    # Get instance metadata to set VSI local AZ
+    # Get instance metadata to set VPC ID
     instance_metadata = ha_fail_over.get_instance_metadata()
-    if "zone" in instance_metadata:
-        ha_fail_over.vsi_local_az = instance_metadata["zone"]["name"]
     if "vpc" in instance_metadata:
         ha_fail_over.vpc_id = instance_metadata["vpc"]["id"]
 
-    # Get the public address range information
-    range_info = ha_fail_over.get_public_address_range(range_id, api_version, maturity, generation)
-    
-    # Get the CIDR from the range info
-    cidr = range_info.get('cidr')
-    if not cidr:
-        raise ApiException(f"No CIDR found for public address range {range_id}")
-
-    # Initialize VPC service
-    authenticator = BearerTokenAuthenticator(ha_fail_over.get_token())
-    ha_fail_over.service = VpcV1(authenticator=authenticator)
-    ha_fail_over.service.set_service_url(ha_fail_over.vpc_url)
-
-    try:
-        # Get all routing tables
-        list_tables = ha_fail_over.service.list_vpc_routing_tables(ha_fail_over.vpc_id).get_result()
-        if not list_tables or "routing_tables" not in list_tables:
-            raise ApiException(f"No routing tables found for VPC {ha_fail_over.vpc_id}")
-
-        # Search through all routing tables and routes
-        for table in list_tables["routing_tables"]:
-            table_id = table["id"]
-            routes = ha_fail_over.service.list_vpc_routing_table_routes(
-                vpc_id=ha_fail_over.vpc_id,
-                routing_table_id=table_id
-            ).get_result()["routes"]
-
-            # Look for route matching the CIDR
-            for route in routes:
-                if route["destination"] == cidr:
-                    next_hop = route["next_hop"]["address"]
-                    ha_fail_over.logger(f"Found next hop {next_hop} for CIDR {cidr}")
-                    return next_hop
-
-        raise ApiException(f"No custom route found for CIDR {cidr} in public address range {range_id}")
-
-    except ApiException as e:
-        ha_fail_over.logger(f"Error getting next hop: {e}")
-        raise ApiException(f"Error getting next hop: {e}") from e
+    return ha_fail_over.get_next_hop_for_par(range_id, api_version, maturity, generation)
 
 def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version="2025-05-06", maturity="beta", generation="2"):
     """Update the target zone of a public address range to match the VSI's local availability zone.
@@ -1087,6 +1113,31 @@ def usage_fip():
     """
     print("{0} [FIP] [CMD add|remove] [VNI_ID] [FIP_ID]"f'{sys.argv[0]}')
     print("\n")
+
+def fail_over_check_next_hop_internet_ingress(next_hop_ip: str, vpc_url: str = "", api_key: str = "") -> bool:
+    """Check if a specific next hop IP is used in the internet ingress routing table.
+
+    Args:
+        next_hop_ip (str): The next hop IP address to check for
+        vpc_url (str, optional): IBM Cloud VPC regional URL. Defaults to "".
+        api_key (str, optional): IBM Cloud API key. Defaults to "".
+
+    Returns:
+        bool: True if the next hop IP is found in the internet ingress routing table, False otherwise
+
+    Raises:
+        ApiException: If there is an error checking the routing tables
+    """
+    ha_fail_over = HAFailOver()
+    ha_fail_over.vpc_url = vpc_url
+    ha_fail_over.apikey = api_key
+
+    # Get instance metadata to set VPC ID
+    instance_metadata = ha_fail_over.get_instance_metadata()
+    if "vpc" in instance_metadata:
+        ha_fail_over.vpc_id = instance_metadata["vpc"]["id"]
+
+    return ha_fail_over.check_next_hop_in_internet_ingress(next_hop_ip)
 
 if __name__ == "__main__":
     if len(sys.argv) > 2:
