@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2024 Eran Gampel
+# Copyright 2025 Eran Gampel
 # Authors:      Eran Gampel , Jorge Hernández Ramírez
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ from os import environ as env
 from dotenv import load_dotenv
 from ibm_cloud_sdk_core import ApiException
 from ibm_cloud_sdk_core.authenticators import BearerTokenAuthenticator
+from ipaddress import ip_network
 
 
 load_dotenv("env")
@@ -111,10 +112,15 @@ class HAFailOver():
             # Read and parse response
             response_data = response.read().decode("utf-8")
             
-            if response.status != 200:
-                raise ApiException(f"API request failed: {response.status} {response.reason}\nResponse: {response_data}")
+            # Handle successful responses
+            if response.status in [200, 201, 204]:
+                # For DELETE operations, 204 No Content is a success
+                if response.status == 204:
+                    return {}
+                return json.loads(response_data) if response_data else {}
                 
-            return json.loads(response_data) if response_data else {}
+            # Handle error responses
+            raise ApiException(f"API request failed: {response.status} {response.reason}\nResponse: {response_data}")
             
         except Exception as e:
             raise ApiException(f"Error making API request: {str(e)}") from e
@@ -152,11 +158,16 @@ class HAFailOver():
             self.logger(f"Error updating floating IP: {e}")
             raise
 
-    def update_vpc_routing_table_route(self, cmd):
+    def update_vpc_routing_table_route(self, cmd, ingress_types=None):
         """Update VPC routing table route.
 
         Args:
             cmd (str): 'SET' or 'GET'
+            ingress_types (list, optional): List of ingress types to update. Can include:
+                - 'route_internet_ingress'
+                - 'route_direct_link_ingress'
+                - 'route_transit_gateway_ingress'
+                Defaults to ['route_direct_link_ingress', 'route_transit_gateway_ingress']
 
         Returns:
             str: Updated next hop IP
@@ -167,9 +178,17 @@ class HAFailOver():
         self.logger(f"VPC self.ext_ip_1: {self.ext_ip_1}")
         self.logger(f"VPC self.ext_ip_2: {self.ext_ip_2}")
         self.logger(f"VPC self.api_key: {str(self.apikey)}")
+        self.logger(f"Command: {cmd}")
+        self.logger(f"Ingress types to update: {ingress_types}")
+
+        # Set default ingress types if none provided
+        if ingress_types is None:
+            ingress_types = ['route_direct_link_ingress', 'route_transit_gateway_ingress']
+        self.logger(f"Using ingress types: {ingress_types}")
 
         try:
             # Get all routing tables
+            self.logger("Getting routing tables...")
             list_tables = self._make_api_request(
                 "GET",
                 f"/v1/vpcs/{self.vpc_id}/routing_tables?version={self.API_VERSION}&generation=2&maturity=beta"
@@ -180,60 +199,80 @@ class HAFailOver():
 
             # Process each routing table
             for table in list_tables["routing_tables"]:
-                ingress_routing_table = table.get("route_direct_link_ingress") or table.get("route_transit_gateway_ingress")
-                table_id = table["id"]
+                # Check if this is one of the specified ingress routing tables
+                is_ingress_table = any(table.get(ingress_type) for ingress_type in ingress_types)
+                if is_ingress_table:
+                    self.logger(f"Found matching ingress routing table: {table['name']} (ID: {table['id']})")
+                    self.logger(f"Table type: internet_ingress={table.get('route_internet_ingress')}, "
+                              f"direct_link_ingress={table.get('route_direct_link_ingress')}, "
+                              f"transit_gateway_ingress={table.get('route_transit_gateway_ingress')}")
+                    table_id = table["id"]
                 
-                # Get routes for this table
-                routes = self._make_api_request(
-                    "GET",
-                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=beta"
-                )["routes"]
+                    # Get routes for this table
+                    self.logger(f"Getting routes for table {table_id}...")
+                    routes = self._make_api_request(
+                        "GET",
+                        f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=beta"
+                    )["routes"]
 
-                # Process each route
-                for route in routes:
-                    if route["next_hop"]["address"] in [self.ext_ip_1, self.ext_ip_2]:
-                        if cmd == "GET":
-                            return route["next_hop"]["address"]
-
-                        self.find_the_current_and_next_hop_ip(route["next_hop"]["address"])
+                    # Process each route
+                    for route in routes:
+                        self.logger(f"Checking route: {route['name']} (ID: {route['id']})")
+                        self.logger(f"Route details - destination: {route['destination']}, zone: {route['zone']['name']}, next_hop: {route['next_hop']['address']}")
                         
-                        # Update or create route based on zone
-                        if route["zone"]["name"] == self.vsi_local_az or not ingress_routing_table:
-                            # Update existing route
-                            route_patch = {
-                                "advertise": route["advertise"],
-                                "name": route["name"],
-                                "next_hop": {"address": self.update_next_hop_vsi},
-                                "priority": route["priority"]
-                            }
-                            
-                            self._make_api_request(
-                                "PATCH",
-                                f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2&maturity=beta",
-                                body=json.dumps(route_patch)
-                            )
-                        else:
-                            # Delete and create new route
-                            self._make_api_request(
-                                "DELETE",
-                                f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2&maturity=beta"
-                            )
-                            
-                            new_route = {
-                                "destination": route["destination"],
-                                "zone": {"name": self.vsi_local_az} if self.vsi_local_az else route["zone"],
-                                "action": "deliver",
-                                "next_hop": {"address": self.update_next_hop_vsi},
-                                "name": route["name"],
-                                "advertise": route["advertise"]
-                            }
-                            
-                            self._make_api_request(
-                                "POST",
-                                f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=beta",
-                                body=json.dumps(new_route)
-                            )
+                        if route["next_hop"]["address"] in [self.ext_ip_1, self.ext_ip_2]:
+                            if cmd == "GET":
+                                self.logger(f"GET command - returning current next hop: {route['next_hop']['address']}")
+                                return route["next_hop"]["address"]
 
+                            self.find_the_current_and_next_hop_ip(route["next_hop"]["address"])
+                            self.logger(f"Route update - current hop: {self.next_hop_vsi}, new hop: {self.update_next_hop_vsi}")
+                            
+                            # Update or create route based on zone
+                            if route["zone"]["name"] == self.vsi_local_az or not is_ingress_table:
+                                self.logger(f"Updating existing route in zone {route['zone']['name']}")
+                                # Update existing route
+                                route_patch = {
+                                    "advertise": route["advertise"],
+                                    "name": route["name"],
+                                    "next_hop": {"address": self.update_next_hop_vsi},
+                                    "priority": route["priority"]
+                                }
+                                
+                                self.logger(f"Patching route {route['id']} with data: {route_patch}")
+                                self._make_api_request(
+                                    "PATCH",
+                                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2&maturity=beta",
+                                    body=json.dumps(route_patch)
+                                )
+                                self.logger(f"Successfully updated route {route['id']} to use next hop {self.update_next_hop_vsi}")
+                            else:
+                                self.logger(f"Route is in different zone ({route['zone']['name']}), creating new route in zone {self.vsi_local_az}")
+                                # Delete and create new route
+                                self.logger(f"Deleting route {route['id']} from zone {route['zone']['name']}")
+                                self._make_api_request(
+                                    "DELETE",
+                                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2&maturity=beta"
+                                )
+                                
+                                new_route = {
+                                    "destination": route["destination"],
+                                    "zone": {"name": self.vsi_local_az} if self.vsi_local_az else route["zone"],
+                                    "action": "deliver",
+                                    "next_hop": {"address": self.update_next_hop_vsi},
+                                    "name": route["name"],
+                                    "advertise": route["advertise"]
+                                }
+                                
+                                self.logger(f"Creating new route with data: {new_route}")
+                                self._make_api_request(
+                                    "POST",
+                                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=beta",
+                                    body=json.dumps(new_route)
+                                )
+                                self.logger(f"Successfully created new route with next hop {self.update_next_hop_vsi}")
+
+            self.logger(f"Returning updated next hop: {self.update_next_hop_vsi}")
             return self.update_next_hop_vsi
 
         except ApiException as e:
@@ -654,14 +693,64 @@ class HAFailOver():
             if not cidr:
                 raise ApiException(f"No CIDR found for public address range {range_id}")
 
-            # First try to find a specific route for the CIDR
-            next_hop = self.get_next_hop_for_cidr(cidr, api_version, maturity, generation)
-            if next_hop:
-                return next_hop
+            # Get all routing tables
+            list_tables = self._make_api_request(
+                "GET",
+                f"/v1/vpcs/{self.vpc_id}/routing_tables?version={api_version}&generation={generation}&maturity={maturity}"
+            )
 
-            # If no specific route found, look for default route (0.0.0.0/0)
-            self.logger("No specific route found, checking for default route")
-            return self.get_next_hop_for_cidr("0.0.0.0/0", api_version, maturity, generation)
+            if not list_tables or "routing_tables" not in list_tables:
+                raise ApiException(f"No routing tables found for VPC {self.vpc_id}")
+
+            # Search through routing tables
+            for table in list_tables["routing_tables"]:
+                # Check if this is an internet ingress routing table
+                if table.get("route_internet_ingress"):
+                    self.logger(f"Found internet ingress routing table: {table['name']} (ID: {table['id']})")
+                    table_id = table["id"]
+                    
+                    # Get all routes in this table
+                    routes = self._make_api_request(
+                        "GET",
+                        f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={api_version}&generation={generation}&maturity={maturity}"
+                    )["routes"]
+
+                    # First try exact CIDR match
+                    for route in routes:
+                        if route["destination"] == cidr:
+                            next_hop = route["next_hop"]["address"]
+                            self.logger(f"Found exact match for CIDR {cidr} with next hop {next_hop}")
+                            return next_hop
+
+                    # If no exact match, find the smallest prefix that contains the CIDR
+                    target_network = ip_network(cidr)
+                    matching_routes = []
+                    
+                    for route in routes:
+                        try:
+                            route_network = ip_network(route["destination"])
+                            if target_network.subnet_of(route_network):
+                                matching_routes.append((route, route_network.prefixlen))
+                        except ValueError:
+                            continue
+
+                    if matching_routes:
+                        # Sort by prefix length (smallest first) and get the first match
+                        matching_routes.sort(key=lambda x: x[1])
+                        best_match = matching_routes[0][0]
+                        next_hop = best_match["next_hop"]["address"]
+                        self.logger(f"Found prefix match for CIDR {cidr} in {best_match['destination']} with next hop {next_hop}")
+                        return next_hop
+
+                    # If no prefix match, look for default route
+                    for route in routes:
+                        if route["destination"] == "0.0.0.0/0":
+                            next_hop = route["next_hop"]["address"]
+                            self.logger(f"Using default route for CIDR {cidr} with next hop {next_hop}")
+                            return next_hop
+
+            self.logger(f"No matching route found for CIDR {cidr}")
+            return None
 
         except ApiException as e:
             self.logger(f"Error getting next hop for public address range: {e}")
@@ -938,7 +1027,8 @@ def get_next_hop_for_par(range_id: str, vpc_url: str = "", api_key: str = "",
 
     return ha_fail_over.get_next_hop_for_par(range_id, api_version, maturity, generation)
 
-def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version="2025-05-06", maturity="beta", generation="2"):
+def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version="2025-05-06", 
+                                 maturity="beta", generation="2", nexthop_ip_1="", nexthop_ip_2=""):
     """Update the target zone of a public address range to match the VSI's local availability zone.
 
     Args:
@@ -948,6 +1038,8 @@ def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version
         api_version (str, optional): API version to use. Defaults to "2025-05-06".
         maturity (str, optional): API maturity level. Defaults to "beta".
         generation (str, optional): API generation. Defaults to "2".
+        nexthop_ip_1 (str, optional): IP address of the first VSI. Defaults to "".
+        nexthop_ip_2 (str, optional): IP address of the second VSI. Defaults to "".
 
     Returns:
         dict: The updated public address range information if updated, None if no update needed
@@ -955,13 +1047,28 @@ def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version
     ha_fail_over = HAFailOver()
     ha_fail_over.vpc_url = vpc_url
     ha_fail_over.apikey = api_key
+    ha_fail_over.ext_ip_1 = nexthop_ip_1
+    ha_fail_over.ext_ip_2 = nexthop_ip_2
 
-    # Get instance metadata to set VSI local AZ
+    # Get instance metadata to set VSI local AZ and VPC ID
     instance_metadata = ha_fail_over.get_instance_metadata()
     if "zone" in instance_metadata:
         ha_fail_over.vsi_local_az = instance_metadata["zone"]["name"]
+    if "vpc" in instance_metadata:
+        ha_fail_over.vpc_id = instance_metadata["vpc"]["id"]
+    else:
+        raise ApiException("Could not get VPC ID from instance metadata")
 
-    return ha_fail_over.update_public_address_range(range_id, api_version, maturity, generation)
+    # Verify we have all required information
+    if not ha_fail_over.vpc_id:
+        raise ApiException("VPC ID is required but not set")
+    if not ha_fail_over.vpc_url:
+        raise ApiException("VPC URL is required but not set")
+
+    next_hop = ha_fail_over.update_vpc_routing_table_route("SET", ["route_internet_ingress"])
+    if next_hop:
+        return ha_fail_over.update_public_address_range(range_id, api_version, maturity, generation)
+    return None
 
 def fail_over_check_par_zone_compatibility(
     range_id: str,
