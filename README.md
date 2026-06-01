@@ -151,7 +151,7 @@ result = fail_over_public_address_range(
     vpc_url="IBM Cloud VPC regional URL",
     api_key="Optional: API key",
     api_version="2026-06-01",  # Optional: API version
-    maturity="ga",             # Optional: API maturity level
+    maturity=None,             # Optional: API maturity level (None for GA APIs)
     generation="2"             # Optional: API generation
 )
 print(result)
@@ -165,7 +165,7 @@ print(result)
 | `vpc_url`          | str(url) | IBM Cloud VPC regional URL                       |
 | `api_key`          | str      | Optional: IBM Cloud API key (needed only if not using trusted profile) |
 | `api_version`      | str      | Optional: API version (defaults to "2026-06-01") |
-| `maturity`         | str      | Optional: API maturity level (defaults to "ga")  |
+| `maturity`         | str      | Optional: API maturity level (defaults to None, omitted for GA APIs) |
 | `generation`       | str      | Optional: API generation (defaults to "2")       |
 
 **Returns:**
@@ -193,7 +193,7 @@ zones_match, current_zone = fail_over_check_par_zone_compatibility(
     vpc_url="IBM Cloud VPC regional URL",
     api_key="Optional: API key",
     api_version="2026-06-01",  # Optional: API version
-    maturity="ga",             # Optional: API maturity level
+    maturity=None,             # Optional: API maturity level (None for GA APIs)
     generation="2"             # Optional: API generation
 )
 
@@ -211,7 +211,7 @@ else:
 | `vpc_url`          | str(url) | IBM Cloud VPC regional URL                       |
 | `api_key`          | str      | Optional: IBM Cloud API key (needed only if not using trusted profile) |
 | `api_version`      | str      | Optional: API version (defaults to "2026-06-01") |
-| `maturity`         | str      | Optional: API maturity level (defaults to "ga")  |
+| `maturity`         | str      | Optional: API maturity level (defaults to None, omitted for GA APIs) |
 | `generation`       | str      | Optional: API generation (defaults to "2")       |
 
 **Returns:**
