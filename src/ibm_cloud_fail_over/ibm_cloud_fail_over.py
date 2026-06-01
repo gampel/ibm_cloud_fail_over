@@ -51,7 +51,7 @@ class HAFailOver():
     METADATA_INSTACE_PATH = "/metadata/v1/instance"
     METADATA_INSTACE_NETWORK_INT_PATH = "/metadata/v1/instance/network_interfaces"
     METADATA_VNI_PATH = "/metadata/v1/virtual_network_interfaces"
-    API_VERSION = "2025-05-06"
+    API_VERSION = "2026-06-01"
     apikey = None
     vpc_url = ""
     vpc_id = ""
@@ -97,7 +97,7 @@ class HAFailOver():
                 'Authorization': self.get_token(),
                 'Content-Type': 'application/json',
                 'X-IBM-Cloud-API-Version': self.API_VERSION,
-                'X-IBM-Cloud-Maturity': 'beta',
+                'X-IBM-Cloud-Maturity': 'ga',
                 'X-IBM-Cloud-Generation': '2'
             }
             
@@ -146,12 +146,12 @@ class HAFailOver():
             if cmd == "remove":
                 self._make_api_request(
                     "DELETE",
-                    f"/v1/network_interfaces/{vni_id}/floating_ips/{fip_id}?version={self.API_VERSION}&generation=2&maturity=beta"
+                    f"/v1/network_interfaces/{vni_id}/floating_ips/{fip_id}?version={self.API_VERSION}&generation=2&maturity=ga"
                 )
             if cmd == "add":
                 self._make_api_request(
                     "PUT",
-                    f"/v1/network_interfaces/{vni_id}/floating_ips/{fip_id}?version={self.API_VERSION}&generation=2&maturity=beta"
+                    f"/v1/network_interfaces/{vni_id}/floating_ips/{fip_id}?version={self.API_VERSION}&generation=2&maturity=ga"
                 )
             return True
         except ApiException as e:
@@ -191,7 +191,7 @@ class HAFailOver():
             self.logger("Getting routing tables...")
             list_tables = self._make_api_request(
                 "GET",
-                f"/v1/vpcs/{self.vpc_id}/routing_tables?version={self.API_VERSION}&generation=2&maturity=beta"
+                f"/v1/vpcs/{self.vpc_id}/routing_tables?version={self.API_VERSION}&generation=2&maturity=ga"
             )
 
             if not list_tables or "routing_tables" not in list_tables:
@@ -212,7 +212,7 @@ class HAFailOver():
                     self.logger(f"Getting routes for table {table_id}...")
                     routes = self._make_api_request(
                         "GET",
-                        f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=beta"
+                        f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=ga"
                     )["routes"]
 
                     # Process each route
@@ -242,7 +242,7 @@ class HAFailOver():
                                 self.logger(f"Patching route {route['id']} with data: {route_patch}")
                                 self._make_api_request(
                                     "PATCH",
-                                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2&maturity=beta",
+                                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2&maturity=ga",
                                     body=json.dumps(route_patch)
                                 )
                                 self.logger(f"Successfully updated route {route['id']} to use next hop {self.update_next_hop_vsi}")
@@ -252,7 +252,7 @@ class HAFailOver():
                                 self.logger(f"Deleting route {route['id']} from zone {route['zone']['name']}")
                                 self._make_api_request(
                                     "DELETE",
-                                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2&maturity=beta"
+                                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2&maturity=ga"
                                 )
                                 
                                 new_route = {
@@ -267,7 +267,7 @@ class HAFailOver():
                                 self.logger(f"Creating new route with data: {new_route}")
                                 self._make_api_request(
                                     "POST",
-                                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=beta",
+                                    f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=ga",
                                     body=json.dumps(new_route)
                                 )
                                 self.logger(f"Successfully created new route with next hop {self.update_next_hop_vsi}")
@@ -606,14 +606,14 @@ class HAFailOver():
         response = json.loads(connection.getresponse().read().decode("utf-8"))
         return response
 
-    def get_next_hop_for_cidr(self, cidr: str, api_version: str = "2025-05-06", 
-                             maturity: str = "beta", generation: str = "2") -> str:
+    def get_next_hop_for_cidr(self, cidr: str, api_version: str = "2026-06-01",
+                             maturity: str = "ga", generation: str = "2") -> str:
         """Get the next hop IP address for a given CIDR in the internet ingress routing table.
 
         Args:
             cidr (str): The CIDR to search for in routing tables
-            api_version (str, optional): API version to use. Defaults to "2025-05-06".
-            maturity (str, optional): API maturity level. Defaults to "beta".
+            api_version (str, optional): API version to use. Defaults to "2026-06-01".
+            maturity (str, optional): API maturity level. Defaults to "ga".
             generation (str, optional): API generation. Defaults to "2".
 
         Returns:
@@ -666,14 +666,14 @@ class HAFailOver():
             self.logger(f"Error getting next hop: {e}")
             raise ApiException(f"Error getting next hop: {e}") from e
 
-    def get_next_hop_for_par(self, range_id: str, api_version: str = "2025-05-06", 
-                            maturity: str = "beta", generation: str = "2") -> str:
+    def get_next_hop_for_par(self, range_id: str, api_version: str = "2026-06-01",
+                            maturity: str = "ga", generation: str = "2") -> str:
         """Get the next hop IP address for a public address range.
 
         Args:
             range_id (str): The ID of the public address range
-            api_version (str, optional): API version to use. Defaults to "2025-05-06".
-            maturity (str, optional): API maturity level. Defaults to "beta".
+            api_version (str, optional): API version to use. Defaults to "2026-06-01".
+            maturity (str, optional): API maturity level. Defaults to "ga".
             generation (str, optional): API generation. Defaults to "2".
 
         Returns:
@@ -756,13 +756,13 @@ class HAFailOver():
             self.logger(f"Error getting next hop for public address range: {e}")
             raise ApiException(f"Error getting next hop for public address range: {e}") from e
 
-    def get_public_address_range(self, range_id, api_version="2025-05-06", maturity="beta", generation="2"):
+    def get_public_address_range(self, range_id, api_version="2026-06-01", maturity="ga", generation="2"):
         """Get information about a public address range.
 
         Args:
             range_id (str): The ID of the public address range to get
-            api_version (str, optional): API version to use. Defaults to "2025-05-06".
-            maturity (str, optional): API maturity level. Defaults to "beta".
+            api_version (str, optional): API version to use. Defaults to "2026-06-01".
+            maturity (str, optional): API maturity level. Defaults to "ga".
             generation (str, optional): API generation. Defaults to "2".
 
         Returns:
@@ -785,7 +785,7 @@ class HAFailOver():
                 'X-IBM-Cloud-Generation': generation
             }
 
-            conn.request("GET", f"/v1/public_address_ranges/{range_id}?version={api_version}&generation={generation}&maturity=beta", headers=headers)
+            conn.request("GET", f"/v1/public_address_ranges/{range_id}?version={api_version}&generation={generation}&maturity={maturity}", headers=headers)
             response = conn.getresponse()
             if response.status != 200:
                 raise ApiException(f"Failed to get public address range: {response.status} {response.reason}")
@@ -832,7 +832,7 @@ class HAFailOver():
 
             self.logger(f"Update range_patch_model: {range_patch_model}")
             conn.request("PATCH",
-                        f"/v1/public_address_ranges/{range_id}?version={api_version}&generation={generation}&maturity=beta",
+                        f"/v1/public_address_ranges/{range_id}?version={api_version}&generation={generation}&maturity={maturity}",
                         body=json.dumps(range_patch_model),
                         headers=headers)
 
@@ -849,8 +849,8 @@ class HAFailOver():
     def check_par_zone_compatibility(
         self,
         range_id: str,
-        api_version: str = "2025-05-06",
-        maturity: str = "beta",
+        api_version: str = "2026-06-01",
+        maturity: str = "ga",
         generation: str = "2"
     ) -> Tuple[bool, str]:
         """Check if the public address range and VSI are in the same zone.
@@ -881,14 +881,14 @@ class HAFailOver():
             self.logger(f"Error checking zone compatibility: {e}")
             raise ApiException(f"Error checking zone compatibility: {e}") from e
 
-    def update_public_address_range(self, range_id, api_version="2025-05-06",
-                                  maturity="beta", generation="2"):
+    def update_public_address_range(self, range_id, api_version="2026-06-01",
+                                  maturity="ga", generation="2"):
         """Update the target zone of a public address range to match the VSI's local availability zone.
 
         Args:
             range_id (str): The ID of the public address range to update
-            api_version (str, optional): API version to use. Defaults to "2025-05-06".
-            maturity (str, optional): API maturity level. Defaults to "beta".
+            api_version (str, optional): API version to use. Defaults to "2026-06-01".
+            maturity (str, optional): API maturity level. Defaults to "ga".
             generation (str, optional): API generation. Defaults to "2".
 
         Returns:
@@ -942,13 +942,13 @@ class HAFailOver():
                 'Authorization': token,
                 'Content-Type': 'application/json',
                 'X-IBM-Cloud-API-Version': self.API_VERSION,
-                'X-IBM-Cloud-Maturity': 'beta',
+                'X-IBM-Cloud-Maturity': 'ga',
                 'X-IBM-Cloud-Generation': '2'
             }
 
             # Get all routing tables
             self.logger("Getting routing tables...")
-            conn.request("GET", f"/v1/vpcs/{self.vpc_id}/routing_tables?version={self.API_VERSION}&generation=2&maturity=beta", 
+            conn.request("GET", f"/v1/vpcs/{self.vpc_id}/routing_tables?version={self.API_VERSION}&generation=2&maturity=ga",
                         headers=headers)
             response = conn.getresponse()
             
@@ -968,8 +968,8 @@ class HAFailOver():
                     table_id = table["id"]
                     
                     # Get all routes in this table
-                    conn.request("GET", 
-                               f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=beta",
+                    conn.request("GET",
+                               f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2&maturity=ga",
                                headers=headers)
                     response = conn.getresponse()
                     
@@ -997,8 +997,8 @@ class HAFailOver():
             self.logger(f"Unexpected error: {e}")
             raise ApiException(f"Unexpected error: {e}") from e
 
-def get_next_hop_for_par(range_id: str, vpc_url: str = "", api_key: str = "", 
-                        api_version: str = "2025-05-06", maturity: str = "beta", 
+def get_next_hop_for_par(range_id: str, vpc_url: str = "", api_key: str = "",
+                        api_version: str = "2026-06-01", maturity: str = "ga",
                         generation: str = "2") -> str:
     """Get the next hop IP address for a public address range.
 
@@ -1006,8 +1006,8 @@ def get_next_hop_for_par(range_id: str, vpc_url: str = "", api_key: str = "",
         range_id (str): The ID of the public address range
         vpc_url (str, optional): IBM Cloud VPC regional URL. Defaults to "".
         api_key (str, optional): IBM Cloud API key. Defaults to "".
-        api_version (str, optional): API version to use. Defaults to "2025-05-06".
-        maturity (str, optional): API maturity level. Defaults to "beta".
+        api_version (str, optional): API version to use. Defaults to "2026-06-01".
+        maturity (str, optional): API maturity level. Defaults to "ga".
         generation (str, optional): API generation. Defaults to "2".
 
     Returns:
@@ -1027,16 +1027,16 @@ def get_next_hop_for_par(range_id: str, vpc_url: str = "", api_key: str = "",
 
     return ha_fail_over.get_next_hop_for_par(range_id, api_version, maturity, generation)
 
-def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version="2025-05-06", 
-                                 maturity="beta", generation="2", nexthop_ip_1="", nexthop_ip_2=""):
+def fail_over_public_address_range(range_id, vpc_url="", api_key="", api_version="2026-06-01",
+                                 maturity="ga", generation="2", nexthop_ip_1="", nexthop_ip_2=""):
     """Update the target zone of a public address range to match the VSI's local availability zone.
 
     Args:
         range_id (str): The ID of the public address range to update
         vpc_url (str, optional): IBM Cloud VPC regional URL. Defaults to "".
         api_key (str, optional): IBM Cloud API key. Defaults to "".
-        api_version (str, optional): API version to use. Defaults to "2025-05-06".
-        maturity (str, optional): API maturity level. Defaults to "beta".
+        api_version (str, optional): API version to use. Defaults to "2026-06-01".
+        maturity (str, optional): API maturity level. Defaults to "ga".
         generation (str, optional): API generation. Defaults to "2".
         nexthop_ip_1 (str, optional): IP address of the first VSI. Defaults to "".
         nexthop_ip_2 (str, optional): IP address of the second VSI. Defaults to "".
@@ -1074,8 +1074,8 @@ def fail_over_check_par_zone_compatibility(
     range_id: str,
     vpc_url: str = "",
     api_key: str = "",
-    api_version: str = "2025-05-06",
-    maturity: str = "beta",
+    api_version: str = "2026-06-01",
+    maturity: str = "ga",
     generation: str = "2"
 ) -> Tuple[bool, str]:
     """Check if the public address range and VSI are in the same zone.
