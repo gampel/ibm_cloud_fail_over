@@ -91,7 +91,7 @@ class HAFailOver():
         try:
             vpc_host = self.vpc_url.replace('https://', '')
             conn = http.client.HTTPSConnection(vpc_host)
-            
+
             # Set up default headers
             default_headers = {
                 'Authorization': self.get_token(),
@@ -99,7 +99,7 @@ class HAFailOver():
                 'X-IBM-Cloud-API-Version': self.API_VERSION,
                 'X-IBM-Cloud-Generation': '2'
             }
-            
+
             # Merge with additional headers if provided
             if headers:
                 default_headers.update(headers)
@@ -107,20 +107,20 @@ class HAFailOver():
             # Make the request
             conn.request(method, path, body=body, headers=default_headers)
             response = conn.getresponse()
-            
+
             # Read and parse response
             response_data = response.read().decode("utf-8")
-            
+
             # Handle successful responses
             if response.status in [200, 201, 204]:
                 # For DELETE operations, 204 No Content is a success
                 if response.status == 204:
                     return {}
                 return json.loads(response_data) if response_data else {}
-                
+
             # Handle error responses
             raise ApiException(f"API request failed: {response.status} {response.reason}\nResponse: {response_data}")
-            
+
         except Exception as e:
             raise ApiException(f"Error making API request: {str(e)}") from e
         finally:
@@ -206,7 +206,7 @@ class HAFailOver():
                               f"direct_link_ingress={table.get('route_direct_link_ingress')}, "
                               f"transit_gateway_ingress={table.get('route_transit_gateway_ingress')}")
                     table_id = table["id"]
-                
+
                     # Get routes for this table
                     self.logger(f"Getting routes for table {table_id}...")
                     routes = self._make_api_request(
@@ -218,7 +218,7 @@ class HAFailOver():
                     for route in routes:
                         self.logger(f"Checking route: {route['name']} (ID: {route['id']})")
                         self.logger(f"Route details - destination: {route['destination']}, zone: {route['zone']['name']}, next_hop: {route['next_hop']['address']}")
-                        
+
                         if route["next_hop"]["address"] in [self.ext_ip_1, self.ext_ip_2]:
                             if cmd == "GET":
                                 self.logger(f"GET command - returning current next hop: {route['next_hop']['address']}")
@@ -226,7 +226,7 @@ class HAFailOver():
 
                             self.find_the_current_and_next_hop_ip(route["next_hop"]["address"])
                             self.logger(f"Route update - current hop: {self.next_hop_vsi}, new hop: {self.update_next_hop_vsi}")
-                            
+
                             # Update or create route based on zone
                             if route["zone"]["name"] == self.vsi_local_az or not is_ingress_table:
                                 self.logger(f"Updating existing route in zone {route['zone']['name']}")
@@ -237,7 +237,7 @@ class HAFailOver():
                                     "next_hop": {"address": self.update_next_hop_vsi},
                                     "priority": route["priority"]
                                 }
-                                
+
                                 self.logger(f"Patching route {route['id']} with data: {route_patch}")
                                 self._make_api_request(
                                     "PATCH",
@@ -253,7 +253,7 @@ class HAFailOver():
                                     "DELETE",
                                     f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes/{route['id']}?version={self.API_VERSION}&generation=2"
                                 )
-                                
+
                                 new_route = {
                                     "destination": route["destination"],
                                     "zone": {"name": self.vsi_local_az} if self.vsi_local_az else route["zone"],
@@ -262,7 +262,7 @@ class HAFailOver():
                                     "name": route["name"],
                                     "advertise": route["advertise"]
                                 }
-                                
+
                                 self.logger(f"Creating new route with data: {new_route}")
                                 self._make_api_request(
                                     "POST",
@@ -642,7 +642,7 @@ class HAFailOver():
                 if table.get("route_internet_ingress"):
                     self.logger(f"Found internet ingress routing table: {table['name']} (ID: {table['id']})")
                     table_id = table["id"]
-                    
+
                     # Get all routes in this table
                     routes = self._make_api_request(
                         "GET",
@@ -653,7 +653,7 @@ class HAFailOver():
                     for route in routes:
                         self.logger(f"Checking route: {route['name']} (ID: {route['id']})")
                         self.logger(f"Route destination: {route['destination']}")
-                        
+
                         if route["destination"] == cidr:
                             next_hop = route["next_hop"]["address"]
                             self.logger(f"Found next hop {next_hop} for CIDR {cidr}")
@@ -687,7 +687,7 @@ class HAFailOver():
         try:
             # Get the public address range information
             range_info = self.get_public_address_range(range_id, api_version, maturity, generation)
-            
+
             # Get the CIDR from the range info
             cidr = range_info.get('cidr')
             if not cidr:
@@ -709,7 +709,7 @@ class HAFailOver():
                 if table.get("route_internet_ingress"):
                     self.logger(f"Found internet ingress routing table: {table['name']} (ID: {table['id']})")
                     table_id = table["id"]
-                    
+
                     # Get all routes in this table
                     routes = self._make_api_request(
                         "GET",
@@ -726,7 +726,7 @@ class HAFailOver():
                     # If no exact match, find the smallest prefix that contains the CIDR
                     target_network = ip_network(cidr)
                     matching_routes = []
-                    
+
                     for route in routes:
                         try:
                             route_network = ip_network(route["destination"])
@@ -937,11 +937,11 @@ class HAFailOver():
         try:
             # Get token for authentication
             token = self.get_token()
-            
+
             # Set up HTTP connection
             vpc_host = self.vpc_url.replace('https://', '')
             conn = http.client.HTTPSConnection(vpc_host)
-            
+
             # Set up headers
             headers = {
                 'Authorization': token,
@@ -955,12 +955,12 @@ class HAFailOver():
             conn.request("GET", f"/v1/vpcs/{self.vpc_id}/routing_tables?version={self.API_VERSION}&generation=2",
                         headers=headers)
             response = conn.getresponse()
-            
+
             if response.status != 200:
                 raise ApiException(f"Failed to get routing tables: {response.status} {response.reason}")
-                
+
             list_tables = json.loads(response.read().decode("utf-8"))
-            
+
             if not list_tables or "routing_tables" not in list_tables:
                 raise ApiException(f"No routing tables found for VPC {self.vpc_id}")
 
@@ -970,23 +970,23 @@ class HAFailOver():
                 if table.get("route_internet_ingress"):
                     self.logger(f"Found internet ingress routing table: {table['name']} (ID: {table['id']})")
                     table_id = table["id"]
-                    
+
                     # Get all routes in this table
                     conn.request("GET",
                                f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={self.API_VERSION}&generation=2",
                                headers=headers)
                     response = conn.getresponse()
-                    
+
                     if response.status != 200:
                         raise ApiException(f"Failed to get routes: {response.status} {response.reason}")
-                        
+
                     routes = json.loads(response.read().decode("utf-8"))["routes"]
 
                     # Check each route for the next hop IP
                     for route in routes:
                         self.logger(f"Checking route: {route['name']} (ID: {route['id']})")
                         self.logger(f"Route next hop: {route['next_hop']['address']}")
-                        
+
                         if route["next_hop"]["address"] == next_hop_ip:
                             self.logger(f"Found matching next hop {next_hop_ip} in route {route['id']}")
                             return True
