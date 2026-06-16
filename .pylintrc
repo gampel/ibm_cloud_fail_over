@@ -12,6 +12,7 @@ disable=C0111,  # missing-docstring
         R0914,  # too-many-locals
         R0915,  # too-many-statements
         W0703,  # broad-except
+        W0125,  # using-constant-test
         R1702,
         R1710,  # inconsistent-return-statements
         E0401,
