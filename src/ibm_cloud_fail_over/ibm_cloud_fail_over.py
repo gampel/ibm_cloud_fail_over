@@ -201,7 +201,7 @@ class HAFailOver():
             # Process each routing table
             for table in list_tables["routing_tables"]:
                 # Check if this is one of the specified ingress routing tables
-                is_ingress_table = any(table.get(ingress_type) for ingress_type in ingress_types)
+                is_ingress_table = bool(any(table.get(ingress_type) for ingress_type in ingress_types))
                 if is_ingress_table:
                     self.logger(f"Found matching ingress routing table: {table['name']} (ID: {table['id']})")
                     self.logger(f"Table type: internet_ingress={table.get('route_internet_ingress')}, "
