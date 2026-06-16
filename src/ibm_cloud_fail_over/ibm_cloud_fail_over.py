@@ -166,7 +166,7 @@ class HAFailOver():
                 - 'route_internet_ingress'
                 - 'route_direct_link_ingress'
                 - 'route_transit_gateway_ingress'
-                Defaults to ['route_direct_link_ingress', 'route_transit_gateway_ingress']
+                Defaults to ['route_direct_link_ingress', 'route_transit_gateway_ingress', 'route_internet_ingress']
 
         Returns:
             str: Updated next hop IP
@@ -182,7 +182,7 @@ class HAFailOver():
 
         # Set default ingress types if none provided
         if ingress_types is None:
-            ingress_types = ['route_direct_link_ingress', 'route_transit_gateway_ingress']
+            ingress_types = ['route_direct_link_ingress', 'route_transit_gateway_ingress', 'route_internet_ingress']
         self.logger(f"Using ingress types: {ingress_types}")
 
         try:
