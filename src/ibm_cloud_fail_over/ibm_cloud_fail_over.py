@@ -23,12 +23,11 @@ import http.client
 import json
 import sys
 import socket
+from ipaddress import ip_network
 from typing import Tuple, Optional
 from os import environ as env
 from dotenv import load_dotenv
 from ibm_cloud_sdk_core import ApiException
-from ibm_cloud_sdk_core.authenticators import BearerTokenAuthenticator
-from ipaddress import ip_network
 
 
 load_dotenv("env")
@@ -88,6 +87,7 @@ class HAFailOver():
         Raises:
             ApiException: If the API request fails
         """
+        conn = None
         try:
             vpc_host = self.vpc_url.replace('https://', '')
             conn = http.client.HTTPSConnection(vpc_host)
@@ -118,13 +118,15 @@ class HAFailOver():
                     return {}
                 return json.loads(response_data) if response_data else {}
 
-            # Handle error responses
+            # Handle error responses - always raise exception for non-success status
             raise ApiException(f"API request failed: {response.status} {response.reason}\nResponse: {response_data}")
 
+        except ApiException:
+            raise
         except Exception as e:
             raise ApiException(f"Error making API request: {str(e)}") from e
         finally:
-            if 'conn' in locals():
+            if conn is not None:
                 conn.close()
 
     def update_vpc_fip(self, cmd, vni_id, fip_id):
@@ -666,6 +668,52 @@ class HAFailOver():
             self.logger(f"Error getting next hop: {e}")
             raise ApiException(f"Error getting next hop: {e}") from e
 
+    def _find_next_hop_in_routes(self, routes: list, cidr: str) -> Optional[str]:
+        """Find the next hop IP address in a list of routes for a given CIDR.
+
+        Args:
+            routes (list): List of route objects
+            cidr (str): The CIDR to find a route for
+
+        Returns:
+            Optional[str]: The next hop IP address, or None if not found
+        """
+        # First try exact CIDR match
+        for route in routes:
+            if route["destination"] == cidr:
+                next_hop = route["next_hop"]["address"]
+                self.logger(f"Found exact match for CIDR {cidr} with next hop {next_hop}")
+                return next_hop
+
+        # If no exact match, find the smallest prefix that contains the CIDR
+        target_network = ip_network(cidr)
+        matching_routes = []
+
+        for route in routes:
+            try:
+                route_network = ip_network(route["destination"])
+                if target_network.subnet_of(route_network):
+                    matching_routes.append((route, route_network.prefixlen))
+            except ValueError:
+                continue
+
+        if matching_routes:
+            # Sort by prefix length (smallest first) and get the first match
+            matching_routes.sort(key=lambda x: x[1])
+            best_match = matching_routes[0][0]
+            next_hop = best_match["next_hop"]["address"]
+            self.logger(f"Found prefix match for CIDR {cidr} in {best_match['destination']} with next hop {next_hop}")
+            return next_hop
+
+        # If no prefix match, look for default route
+        for route in routes:
+            if route["destination"] == "0.0.0.0/0":
+                next_hop = route["next_hop"]["address"]
+                self.logger(f"Using default route for CIDR {cidr} with next hop {next_hop}")
+                return next_hop
+
+        return None
+
     def get_next_hop_for_par(self, range_id: str, api_version: str = "2026-06-01",
                             maturity: Optional[str] = None, generation: str = "2") -> str:
         """Get the next hop IP address for a public address range.
@@ -716,39 +764,10 @@ class HAFailOver():
                         f"/v1/vpcs/{self.vpc_id}/routing_tables/{table_id}/routes?version={api_version}&generation={generation}{maturity_param}"
                     )["routes"]
 
-                    # First try exact CIDR match
-                    for route in routes:
-                        if route["destination"] == cidr:
-                            next_hop = route["next_hop"]["address"]
-                            self.logger(f"Found exact match for CIDR {cidr} with next hop {next_hop}")
-                            return next_hop
-
-                    # If no exact match, find the smallest prefix that contains the CIDR
-                    target_network = ip_network(cidr)
-                    matching_routes = []
-
-                    for route in routes:
-                        try:
-                            route_network = ip_network(route["destination"])
-                            if target_network.subnet_of(route_network):
-                                matching_routes.append((route, route_network.prefixlen))
-                        except ValueError:
-                            continue
-
-                    if matching_routes:
-                        # Sort by prefix length (smallest first) and get the first match
-                        matching_routes.sort(key=lambda x: x[1])
-                        best_match = matching_routes[0][0]
-                        next_hop = best_match["next_hop"]["address"]
-                        self.logger(f"Found prefix match for CIDR {cidr} in {best_match['destination']} with next hop {next_hop}")
+                    # Try to find the next hop using helper method
+                    next_hop = self._find_next_hop_in_routes(routes, cidr)
+                    if next_hop:
                         return next_hop
-
-                    # If no prefix match, look for default route
-                    for route in routes:
-                        if route["destination"] == "0.0.0.0/0":
-                            next_hop = route["next_hop"]["address"]
-                            self.logger(f"Using default route for CIDR {cidr} with next hop {next_hop}")
-                            return next_hop
 
             self.logger(f"No matching route found for CIDR {cidr}")
             return None
