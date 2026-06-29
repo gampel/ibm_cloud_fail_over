@@ -804,10 +804,12 @@ class HAFailOver():
                 'X-IBM-Cloud-API-Version': api_version,
                 'X-IBM-Cloud-Generation': generation
             }
-            if maturity:
+            # Public Address Range (PAR) GA endpoints do not accept maturity parameter
+            if maturity and maturity != "ga":
                 headers['X-IBM-Cloud-Maturity'] = maturity
-
-            maturity_param = f"&maturity={maturity}" if maturity else ""
+                maturity_param = f"&maturity={maturity}"
+            else:
+                maturity_param = ""
             conn.request("GET", f"/v1/public_address_ranges/{range_id}?version={api_version}&generation={generation}{maturity_param}", headers=headers)
             response = conn.getresponse()
             if response.status != 200:
@@ -843,9 +845,12 @@ class HAFailOver():
                 'X-IBM-Cloud-API-Version': api_version,
                 'X-IBM-Cloud-Generation': generation
             }
-            if maturity:
+            # public_address_ranges GA endpoints do not accept maturity parameter
+            if maturity and maturity != "ga":
                 headers['X-IBM-Cloud-Maturity'] = maturity
-
+                maturity_param = f"&maturity={maturity}"
+            else:
+                maturity_param = ""
             range_patch_model = {
                 "target": {
                     "zone": {
@@ -855,7 +860,6 @@ class HAFailOver():
             }
 
             self.logger(f"Update range_patch_model: {range_patch_model}")
-            maturity_param = f"&maturity={maturity}" if maturity else ""
             conn.request("PATCH",
                         f"/v1/public_address_ranges/{range_id}?version={api_version}&generation={generation}{maturity_param}",
                         body=json.dumps(range_patch_model),
